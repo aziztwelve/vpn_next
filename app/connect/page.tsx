@@ -1,0 +1,319 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { ArrowLeft, Check, Copy, Globe, Loader2, RefreshCw, Smartphone } from 'lucide-react';
+import {
+  ApiError,
+  vpnApi,
+  type VLESSLinkResponse,
+  type VPNServer,
+} from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import { useTelegram } from '@/lib/useTelegram';
+
+// device_id — это то, за что биндится слот лимита устройств.
+// Генерим один раз на устройство, храним в localStorage.
+const DEVICE_ID_KEY = 'vpn_device_id';
+
+function getOrCreateDeviceId(): string {
+  if (typeof window === 'undefined') return '';
+  let id = localStorage.getItem(DEVICE_ID_KEY);
+  if (!id) {
+    const rand =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2) + Date.now().toString(36);
+    id = `web-${rand}`;
+    localStorage.setItem(DEVICE_ID_KEY, id);
+  }
+  return id;
+}
+
+type LinkState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'ok'; data: VLESSLinkResponse }
+  | { kind: 'limit'; message: string }
+  | { kind: 'error'; message: string };
+
+export default function ConnectPage() {
+  const { status, error: authError } = useAuth();
+  const { hapticFeedback, showAlert, webApp } = useTelegram();
+
+  const [servers, setServers] = useState<VPNServer[]>([]);
+  const [serversLoading, setServersLoading] = useState(true);
+  const [serversError, setServersError] = useState<string | null>(null);
+
+  const [selectedServerId, setSelectedServerId] = useState<number | null>(null);
+  const [link, setLink] = useState<LinkState>({ kind: 'idle' });
+  const [copied, setCopied] = useState(false);
+
+  const deviceId = useMemo(() => getOrCreateDeviceId(), []);
+
+  // Загрузка серверов.
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    let cancelled = false;
+    setServersLoading(true);
+    setServersError(null);
+
+    (async () => {
+      try {
+        const list = await vpnApi.listServers(true);
+        if (cancelled) return;
+        setServers(list ?? []);
+        if (list && list.length > 0) {
+          // Сервер с минимальной загрузкой — лучший дефолт.
+          const best = [...list].sort(
+            (a, b) => (a.load_percent ?? 0) - (b.load_percent ?? 0)
+          )[0];
+          setSelectedServerId(best.id);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setServersError(err instanceof Error ? err.message : 'Ошибка загрузки');
+        }
+      } finally {
+        if (!cancelled) setServersLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
+
+  const fetchLink = useCallback(async () => {
+    if (!selectedServerId || !deviceId) return;
+    setLink({ kind: 'loading' });
+    setCopied(false);
+    try {
+      const data = await vpnApi.getVLESSLink(selectedServerId, deviceId);
+      setLink({ kind: 'ok', data });
+      hapticFeedback('success');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 429) {
+        setLink({ kind: 'limit', message: err.message || 'Лимит устройств исчерпан' });
+        hapticFeedback('warning');
+      } else {
+        const msg = err instanceof Error ? err.message : 'Не удалось получить ключ';
+        setLink({ kind: 'error', message: msg });
+        hapticFeedback('error');
+      }
+    }
+  }, [selectedServerId, deviceId, hapticFeedback]);
+
+  // Как только выбран сервер и юзер авторизован — запрашиваем ключ.
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    if (selectedServerId == null) return;
+    void fetchLink();
+  }, [status, selectedServerId, fetchLink]);
+
+  const handleCopy = async () => {
+    if (link.kind !== 'ok') return;
+    try {
+      await navigator.clipboard.writeText(link.data.vless_link);
+      setCopied(true);
+      hapticFeedback('success');
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      showAlert('Не получилось скопировать — выдели ссылку вручную.');
+    }
+  };
+
+  const handleOpenExternal = () => {
+    if (link.kind !== 'ok') return;
+    // В Telegram openLink правильнее, в обычном браузере — window.open.
+    if (webApp?.openLink) webApp.openLink(link.data.vless_link);
+    else window.open(link.data.vless_link, '_blank');
+  };
+
+  if (status === 'loading') return <Loader label="Авторизация..." />;
+
+  if (status !== 'authenticated') {
+    return (
+      <ErrorScreen message={authError ?? 'Нужна авторизация через Telegram.'}>
+        <Link href="/" className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-6 py-3 inline-block">
+          На главную
+        </Link>
+      </ErrorScreen>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-50 p-6">
+      <div className="max-w-2xl mx-auto space-y-6">
+        <div className="flex items-center">
+          <Link href="/" className="mr-4" aria-label="Назад">
+            <ArrowLeft className="w-6 h-6" />
+          </Link>
+          <h1 className="text-2xl font-bold">Подключение</h1>
+        </div>
+
+        <section>
+          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+            <Globe className="w-5 h-5 text-blue-400" /> Сервер
+          </h2>
+          {serversLoading && <p className="text-slate-400">Загружаем список серверов...</p>}
+          {serversError && <p className="text-red-400">{serversError}</p>}
+          {!serversLoading && !serversError && servers.length === 0 && (
+            <p className="text-slate-400">Серверов пока нет. Зайди позже.</p>
+          )}
+          <div className="grid gap-2">
+            {servers.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => {
+                  setSelectedServerId(s.id);
+                  hapticFeedback('light');
+                }}
+                className={`flex items-center justify-between bg-slate-900 rounded-lg p-4 border-2 transition text-left ${
+                  selectedServerId === s.id
+                    ? 'border-blue-500'
+                    : 'border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                <div>
+                  <p className="font-medium">
+                    {flagEmoji(s.country_code)} {s.name}
+                  </p>
+                  <p className="text-slate-400 text-sm">{s.location}</p>
+                </div>
+                <LoadBadge percent={s.load_percent ?? 0} />
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+            <Smartphone className="w-5 h-5 text-blue-400" /> Твой ключ
+          </h2>
+
+          {link.kind === 'idle' && (
+            <p className="text-slate-400 text-sm">Выбери сервер, чтобы получить ссылку.</p>
+          )}
+
+          {link.kind === 'loading' && (
+            <div className="flex items-center gap-2 text-slate-400">
+              <Loader2 className="w-4 h-4 animate-spin" /> Запрашиваем VLESS-ссылку...
+            </div>
+          )}
+
+          {link.kind === 'limit' && (
+            <div className="bg-yellow-500/10 border border-yellow-500/40 text-yellow-200 rounded-lg p-4">
+              <p className="font-semibold mb-1">Лимит устройств исчерпан</p>
+              <p className="text-sm mb-3">{link.message}</p>
+              <Link
+                href="/devices"
+                className="inline-block bg-yellow-500 hover:bg-yellow-400 text-slate-900 rounded-lg px-4 py-2 text-sm font-semibold transition"
+              >
+                Управлять устройствами
+              </Link>
+            </div>
+          )}
+
+          {link.kind === 'error' && (
+            <div className="bg-red-500/10 border border-red-500/40 text-red-300 rounded-lg p-4">
+              <p className="text-sm mb-3">{link.message}</p>
+              <button
+                type="button"
+                onClick={() => void fetchLink()}
+                className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 rounded-lg px-4 py-2 text-sm transition"
+              >
+                <RefreshCw className="w-4 h-4" /> Повторить
+              </button>
+            </div>
+          )}
+
+          {link.kind === 'ok' && (
+            <div className="bg-slate-900 rounded-lg p-6 space-y-4">
+              <div className="flex justify-between items-center text-sm text-slate-400">
+                <span>
+                  Устройства: {link.data.current_devices}/{link.data.max_devices}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void fetchLink()}
+                  className="inline-flex items-center gap-1 hover:text-slate-200"
+                >
+                  <RefreshCw className="w-3 h-3" /> обновить
+                </button>
+              </div>
+
+              <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                <p className="text-slate-500 text-xs mb-2">VLESS-ссылка</p>
+                <p className="text-slate-200 text-xs font-mono break-all leading-relaxed">
+                  {link.data.vless_link}
+                </p>
+              </div>
+
+              <p className="text-slate-500 text-xs text-center">
+                Скопируй ссылку и вставь в v2rayNG / Streisand / Hiddify. QR-код добавим позже.
+              </p>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="flex-1 inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 rounded-lg py-3 font-semibold transition"
+                >
+                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  {copied ? 'Скопировано' : 'Скопировать'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenExternal}
+                  className="flex-1 bg-slate-800 hover:bg-slate-700 rounded-lg py-3 font-semibold transition"
+                >
+                  Открыть
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function LoadBadge({ percent }: { percent: number }) {
+  const color =
+    percent < 50 ? 'text-green-400' : percent < 80 ? 'text-yellow-400' : 'text-red-400';
+  return <span className={`text-sm font-mono ${color}`}>{percent}%</span>;
+}
+
+// Небольшая флагизация — дешёво и сердито (ISO-3166-1 alpha-2 → emoji).
+function flagEmoji(code: string): string {
+  if (!code || code.length !== 2) return '🌐';
+  const A = 0x1f1e6;
+  const base = 'A'.charCodeAt(0);
+  const u = code.toUpperCase();
+  return String.fromCodePoint(A + u.charCodeAt(0) - base) +
+    String.fromCodePoint(A + u.charCodeAt(1) - base);
+}
+
+function Loader({ label }: { label: string }) {
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4" />
+        <p className="text-slate-400">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+function ErrorScreen({ message, children }: { message: string; children?: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+      <div className="text-center">
+        <p className="text-red-400 mb-4">{message}</p>
+        {children}
+      </div>
+    </div>
+  );
+}
