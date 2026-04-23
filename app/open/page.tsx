@@ -43,7 +43,17 @@ const ALLOWED_SCHEMES = [
 
 // Маппинг: scheme → человекочитаемое имя клиента + ссылки на сторы.
 // Нужно для fallback-UI когда автоприложение не открылось (клиент не стоит).
+//
+// `vless://` — универсальная scheme, её клеймит любой VLESS-клиент, который
+// установлен первым. В нашем UI её использует кнопка Happ (см. /connect),
+// поэтому сториджи здесь указываем именно на Happ — самая частая iOS-цель
+// для сырых vless-линков у RU-аудитории.
 const CLIENT_INFO: Record<string, { name: string; ios?: string; android?: string }> = {
+  'vless://': {
+    name: 'Happ',
+    ios: 'https://apps.apple.com/app/happ-proxy-utility/id6504287215',
+    android: 'https://play.google.com/store/apps/details?id=com.happproxy',
+  },
   'happ://': {
     name: 'Happ',
     ios: 'https://apps.apple.com/app/happ-proxy-utility/id6504287215',

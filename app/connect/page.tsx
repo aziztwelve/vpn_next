@@ -209,15 +209,22 @@ export default function ConnectPage() {
 
   /**
    * Преобразует VLESS-ссылку в deeplink конкретного клиента.
-   * У большинства клиентов схема типа `<scheme>://<mode>/<payload>`, где payload —
-   * либо raw vless:// (иногда url-encoded), либо base64url(vless://).
+   *
+   * Happ — особый случай: его схема `happ://add/<b64>` предназначена ТОЛЬКО
+   * для подписок (декодированное тело обязано быть https-URL'ом). Для
+   * импорта одиночного vless-конфига Happ клеймит сам `vless://` scheme —
+   * достаточно открыть ссылку как есть, iOS её отдаст Happ'у
+   * (или любому другому VPN-клиенту, зарегистрированному на vless://).
+   * Подтверждено: https://happ.su/main/faq/adding-configuration-subscription
+   *
+   * Остальные (V2RayTun/Hiddify/Streisand) используют собственную
+   * `<scheme>://...` URI с URL-encoded payload'ом.
    */
   const buildClientDeeplinks = (vlessLink: string): { id: string; label: string; url: string }[] => {
     const encoded = encodeURIComponent(vlessLink);
-    const b64 = btoa(vlessLink).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     return [
-      // Happ — iOS/macOS/Android, популярный в RU. base64url payload.
-      { id: 'happ', label: 'Happ', url: `happ://add/${b64}` },
+      // Happ — открывается по vless:// scheme'у напрямую.
+      { id: 'happ', label: 'Happ', url: vlessLink },
       // V2RayTun (Android/iOS) — принимает url-encoded vless.
       { id: 'v2raytun', label: 'V2RayTun', url: `v2raytun://import/${encoded}` },
       // Hiddify (cross-platform)
