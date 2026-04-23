@@ -416,6 +416,79 @@ export default function ConnectPage() {
                 </div>
               </div>
 
+
+              <div className="bg-blue-500/10 border border-blue-500/40 rounded-lg p-4">
+                <p className="text-blue-200 text-sm font-semibold mb-2">🎉 Подписка с 3 режимами</p>
+                <p className="text-blue-200/80 text-xs mb-3">
+                  Добавь подписку и выбери режим: 🚀 Обход блокировок, 🔒 Весь трафик, 🎬 YouTube без рекламы
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const subscriptionUrl = 'https://cdn.osmonai.com/api/v1/subscription/test';
+                      const deeplink = `happ://add/${subscriptionUrl}`;
+                      if (webApp?.openLink) {
+                        const redirectUrl = `${window.location.origin}/open?url=${encodeURIComponent(deeplink)}`;
+                        webApp.openLink(redirectUrl);
+                      } else {
+                        openDeeplink(deeplink);
+                      }
+                    }}
+                    className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 rounded-lg py-2.5 text-sm font-semibold transition"
+                  >
+                    Happ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const subscriptionUrl = 'https://cdn.osmonai.com/api/v1/subscription/test';
+                      const deeplink = `v2raytun://install-sub?url=${encodeURIComponent(subscriptionUrl)}`;
+                      if (webApp?.openLink) {
+                        const redirectUrl = `${window.location.origin}/open?url=${encodeURIComponent(deeplink)}`;
+                        webApp.openLink(redirectUrl);
+                      } else {
+                        openDeeplink(deeplink);
+                      }
+                    }}
+                    className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 rounded-lg py-2.5 text-sm font-semibold transition"
+                  >
+                    V2RayTun
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const subscriptionUrl = 'https://cdn.osmonai.com/api/v1/subscription/test';
+                      const deeplink = `hiddify://install-sub?url=${encodeURIComponent(subscriptionUrl)}`;
+                      if (webApp?.openLink) {
+                        const redirectUrl = `${window.location.origin}/open?url=${encodeURIComponent(deeplink)}`;
+                        webApp.openLink(redirectUrl);
+                      } else {
+                        openDeeplink(deeplink);
+                      }
+                    }}
+                    className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 rounded-lg py-2.5 text-sm font-semibold transition"
+                  >
+                    Hiddify
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const subscriptionUrl = 'https://cdn.osmonai.com/api/v1/subscription/test';
+                      const deeplink = `streisand://install-sub?url=${encodeURIComponent(subscriptionUrl)}`;
+                      if (webApp?.openLink) {
+                        const redirectUrl = `${window.location.origin}/open?url=${encodeURIComponent(deeplink)}`;
+                        webApp.openLink(redirectUrl);
+                      } else {
+                        openDeeplink(deeplink);
+                      }
+                    }}
+                    className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 rounded-lg py-2.5 text-sm font-semibold transition"
+                  >
+                    Streisand
+                  </button>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={handleCopy}
