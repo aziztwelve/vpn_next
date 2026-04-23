@@ -39,7 +39,24 @@ export interface DevicePrice {
   plan_name: string;
 }
 
-export type SubscriptionStatus = 'active' | 'expired' | 'cancelled' | string;
+export type SubscriptionStatus = 'active' | 'trial' | 'expired' | 'cancelled' | string;
+
+// Ответ POST /auth/validate. Для новых юзеров backend сразу активирует
+// триал — подписку, возвращает trial_activated=true + сокращённую версию
+// subscription (только поля для баннера/виджета).
+export interface ValidateTelegramResponse {
+  user: User;
+  jwt_token: string;
+  trial_activated?: boolean;
+  subscription?: {
+    id: number;
+    plan_id: number;
+    plan_name: string;
+    max_devices: number;
+    expires_at: string;
+    status: SubscriptionStatus;
+  };
+}
 
 export interface Subscription {
   id: number;
@@ -187,8 +204,8 @@ class VPNApiClient {
 
   // ─── Auth ─────────────────────────────────────────────────────────
 
-  async validateTelegramUser(initData: string): Promise<{ user: User; jwt_token: string }> {
-    const result = await this.request<{ user: User; jwt_token: string }>('/auth/validate', {
+  async validateTelegramUser(initData: string): Promise<ValidateTelegramResponse> {
+    const result = await this.request<ValidateTelegramResponse>('/auth/validate', {
       method: 'POST',
       body: JSON.stringify({ init_data: initData }),
     });

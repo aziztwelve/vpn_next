@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { CreditCard, Globe, History, Shield, Smartphone } from 'lucide-react';
 import { ApiError, vpnApi, type Subscription } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { TrialBanner } from '@/components/trial-banner';
 
 type ActiveState =
   | { kind: 'idle' }
@@ -60,6 +61,8 @@ export default function HomePage() {
           <h1 className="text-3xl font-bold">VPN</h1>
           <p className="text-slate-400 text-sm mt-1">Быстро, без логов, по Telegram Stars.</p>
         </header>
+
+        <TrialBanner />
 
         <section className="bg-slate-900 rounded-lg p-6">
           {status === 'loading' && <p className="text-slate-400">Авторизуемся через Telegram...</p>}
