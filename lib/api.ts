@@ -135,6 +135,18 @@ export class ApiError extends Error {
     this.body = body;
     this.name = 'ApiError';
   }
+
+  /** Достаёт машинно-читаемый `error`-код из JSON-ответа бэкенда,
+   *  если тот отдал его в формате {"error":"...","message":"..."}.
+   *  Нужен чтобы фронт мапил код на локализованный UX-текст,
+   *  а не парсил технические сообщения руками. */
+  get code(): string | null {
+    if (this.body && typeof this.body === 'object' && 'error' in this.body) {
+      const e = (this.body as { error: unknown }).error;
+      return typeof e === 'string' ? e : null;
+    }
+    return null;
+  }
 }
 
 // ───── Клиент ──────────────────────────────────────────────────────
