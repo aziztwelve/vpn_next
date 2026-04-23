@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.gitignore
+.env*
+!.env.example
+Dockerfile
+.dockerignore
+README.md
+AGENTS.md
+CLAUDE.md
+tsconfig.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
