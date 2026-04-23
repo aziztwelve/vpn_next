@@ -108,8 +108,36 @@ export default function ConnectPage() {
   useEffect(() => {
     if (status !== 'authenticated') return;
     if (selectedServerId == null) return;
-    void fetchLink();
-  }, [status, selectedServerId, fetchLink]);
+    if (!deviceId) return;
+    
+    let cancelled = false;
+    setLink({ kind: 'loading' });
+    setCopied(false);
+    
+    (async () => {
+      try {
+        const data = await vpnApi.getVLESSLink(selectedServerId, deviceId);
+        if (cancelled) return;
+        setLink({ kind: 'ok', data });
+        hapticFeedback('success');
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 429) {
+          setLink({ kind: 'limit', message: err.message || 'Лимит устройств исчерпан' });
+          hapticFeedback('warning');
+        } else {
+          const msg = err instanceof Error ? err.message : 'Не удалось получить ключ';
+          setLink({ kind: 'error', message: msg });
+          hapticFeedback('error');
+        }
+      }
+    })();
+    
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, selectedServerId, deviceId]);
 
   const handleCopy = async () => {
     if (link.kind !== 'ok') return;
@@ -128,6 +156,26 @@ export default function ConnectPage() {
     // В Telegram openLink правильнее, в обычном браузере — window.open.
     if (webApp?.openLink) webApp.openLink(link.data.vless_link);
     else window.open(link.data.vless_link, '_blank');
+  };
+
+  const handleOpenInHapp = () => {
+    if (link.kind !== 'ok') return;
+    // Happ принимает deeplink вида happ://add/<base64url(vless-link)>.
+    // btoa безопасен — VLESS-ссылка всегда ASCII (хост — IP/домен, UUID, hex).
+    const b64 = btoa(link.data.vless_link)
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    const happUrl = `happ://add/${b64}`;
+    // webApp.openLink принимает только http/https — для custom-схем идём
+    // через <a>.click(), WebView отдаст URL системе, iOS подхватит Happ.
+    const a = document.createElement('a');
+    a.href = happUrl;
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    hapticFeedback('light');
   };
 
   if (status === 'loading') return <Loader label="Авторизация..." />;
@@ -252,14 +300,21 @@ export default function ConnectPage() {
               </div>
 
               <p className="text-slate-500 text-xs text-center">
-                Скопируй ссылку и вставь в v2rayNG / Streisand / Hiddify. QR-код добавим позже.
+                Открой прямо в Happ — или скопируй ссылку в v2rayTun / Streisand / Hiddify.
               </p>
 
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleOpenInHapp}
+                  className="col-span-2 inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 rounded-lg py-3 font-semibold transition"
+                >
+                  Открыть в Happ
+                </button>
                 <button
                   type="button"
                   onClick={handleCopy}
-                  className="flex-1 inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 rounded-lg py-3 font-semibold transition"
+                  className="inline-flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 rounded-lg py-3 font-semibold transition"
                 >
                   {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                   {copied ? 'Скопировано' : 'Скопировать'}
@@ -267,9 +322,9 @@ export default function ConnectPage() {
                 <button
                   type="button"
                   onClick={handleOpenExternal}
-                  className="flex-1 bg-slate-800 hover:bg-slate-700 rounded-lg py-3 font-semibold transition"
+                  className="bg-slate-800 hover:bg-slate-700 rounded-lg py-3 font-semibold transition"
                 >
-                  Открыть
+                  Открыть (vless://)
                 </button>
               </div>
             </div>
