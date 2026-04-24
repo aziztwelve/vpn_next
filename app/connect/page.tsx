@@ -68,6 +68,12 @@ export default function ConnectPage() {
   const [link, setLink] = useState<LinkState>({ kind: 'idle' });
   const [copied, setCopied] = useState(false);
 
+  // subscription_url: персональная ссылка подписки для Happ/Hiddify/Streisand.
+  // Грузим один раз после авторизации. Если vpn_user ещё не создан (no_active_subscription)
+  // — подставляем null, кнопки показывают ссылку на `/subscribe`.
+  const [subscriptionUrl, setSubscriptionUrl] = useState<string | null>(null);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+
   const deviceId = useMemo(() => getOrCreateDeviceId(), []);
 
   // Загрузка серверов.
@@ -98,6 +104,34 @@ export default function ConnectPage() {
       }
     })();
 
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
+
+  // Загрузка subscription URL (один раз после auth). 404 — нет активной
+  // подписки, не ошибка, просто скрываем блок.
+  //
+  // URL берём из ответа бэка: `subscription_url`. Он строится в gateway из
+  // env PUBLIC_BASE_URL = https://cdn.osmonai.com. Нельзя полагаться на
+  // window.location.origin, т.к. Mini App может быть открыт через dev-URL
+  // (127.0.0.1:<port>), а Happ на телефоне не достучится до этого хоста.
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await vpnApi.getSubscriptionToken();
+        if (!cancelled) setSubscriptionUrl(resp.subscription_url);
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 404) {
+          setSubscriptionError('Нет активной подписки');
+          return;
+        }
+        setSubscriptionError(err instanceof Error ? err.message : 'Ошибка');
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -208,29 +242,25 @@ export default function ConnectPage() {
   );
 
   /**
-   * Преобразует VLESS-ссылку в deeplink конкретного клиента.
+   * Преобразует URL подписки в deeplink конкретного VPN-клиента.
    *
-   * Happ — особый случай: его схема `happ://add/<b64>` предназначена ТОЛЬКО
-   * для подписок (декодированное тело обязано быть https-URL'ом). Для
-   * импорта одиночного vless-конфига Happ клеймит сам `vless://` scheme —
-   * достаточно открыть ссылку как есть, iOS её отдаст Happ'у
-   * (или любому другому VPN-клиенту, зарегистрированному на vless://).
-   * Подтверждено: https://happ.su/main/faq/adding-configuration-subscription
-   *
-   * Остальные (V2RayTun/Hiddify/Streisand) используют собственную
-   * `<scheme>://...` URI с URL-encoded payload'ом.
+   * Все 4 клиента принимают подписку по https-URL'у, различие — в scheme/пути:
+   *   - Happ: `happ://add/<raw https-url>` (без url-encode, см.
+   *     https://happ.su/main/faq/adding-configuration-subscription)
+   *   - V2RayTun: `v2raytun://import/<url-encoded url>` — тот же import-хэндлер,
+   *     что и для одиночных конфигов, приложение само детектит тип ответа.
+   *   - Hiddify: `hiddify://install-sub?url=<url-encoded url>`
+   *   - INCY: `incy://add/<raw https-url>` — та же конвенция что у Happ.
    */
-  const buildClientDeeplinks = (vlessLink: string): { id: string; label: string; url: string }[] => {
-    const encoded = encodeURIComponent(vlessLink);
+  const buildSubscriptionDeeplinks = (
+    subUrl: string,
+  ): { id: string; label: string; url: string }[] => {
+    const encoded = encodeURIComponent(subUrl);
     return [
-      // Happ — открывается по vless:// scheme'у напрямую.
-      { id: 'happ', label: 'Happ', url: vlessLink },
-      // V2RayTun (Android/iOS) — принимает url-encoded vless.
+      { id: 'happ', label: 'Happ', url: `happ://add/${subUrl}` },
       { id: 'v2raytun', label: 'V2RayTun', url: `v2raytun://import/${encoded}` },
-      // Hiddify (cross-platform)
-      { id: 'hiddify', label: 'Hiddify', url: `hiddify://install-config?url=${encoded}` },
-      // Streisand (iOS)
-      { id: 'streisand', label: 'Streisand', url: `streisand://import/${encoded}` },
+      { id: 'hiddify', label: 'Hiddify', url: `hiddify://install-sub?url=${encoded}` },
+      { id: 'incy', label: 'INCY', url: `incy://add/${subUrl}` },
     ];
   };
 
@@ -402,92 +432,34 @@ export default function ConnectPage() {
 
               <div>
                 <p className="text-slate-400 text-xs mb-2">Или открой в приложении:</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {buildClientDeeplinks(link.data.vless_link).map((dl) => (
-                    <button
-                      key={dl.id}
-                      type="button"
-                      onClick={() => openDeeplink(dl.url)}
-                      className="inline-flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 rounded-lg py-2.5 text-sm font-semibold transition"
-                    >
-                      {dl.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
 
+                {subscriptionError && !subscriptionUrl && (
+                  <p className="text-rose-300/80 text-xs">
+                    {subscriptionError}. Купи подписку чтобы получить ссылку импорта.
+                  </p>
+                )}
 
-              <div className="bg-blue-500/10 border border-blue-500/40 rounded-lg p-4">
-                <p className="text-blue-200 text-sm font-semibold mb-2">🎉 Подписка с 3 режимами</p>
-                <p className="text-blue-200/80 text-xs mb-3">
-                  Добавь подписку и выбери режим: 🚀 Обход блокировок, 🔒 Весь трафик, 🎬 YouTube без рекламы
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const subscriptionUrl = 'https://cdn.osmonai.com/api/v1/subscription/test';
-                      const deeplink = `happ://add/${subscriptionUrl}`;
-                      if (webApp?.openLink) {
-                        const redirectUrl = `${window.location.origin}/open?url=${encodeURIComponent(deeplink)}`;
-                        webApp.openLink(redirectUrl);
-                      } else {
-                        openDeeplink(deeplink);
-                      }
-                    }}
-                    className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 rounded-lg py-2.5 text-sm font-semibold transition"
-                  >
-                    Happ
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const subscriptionUrl = 'https://cdn.osmonai.com/api/v1/subscription/test';
-                      const deeplink = `v2raytun://install-sub?url=${encodeURIComponent(subscriptionUrl)}`;
-                      if (webApp?.openLink) {
-                        const redirectUrl = `${window.location.origin}/open?url=${encodeURIComponent(deeplink)}`;
-                        webApp.openLink(redirectUrl);
-                      } else {
-                        openDeeplink(deeplink);
-                      }
-                    }}
-                    className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 rounded-lg py-2.5 text-sm font-semibold transition"
-                  >
-                    V2RayTun
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const subscriptionUrl = 'https://cdn.osmonai.com/api/v1/subscription/test';
-                      const deeplink = `hiddify://install-sub?url=${encodeURIComponent(subscriptionUrl)}`;
-                      if (webApp?.openLink) {
-                        const redirectUrl = `${window.location.origin}/open?url=${encodeURIComponent(deeplink)}`;
-                        webApp.openLink(redirectUrl);
-                      } else {
-                        openDeeplink(deeplink);
-                      }
-                    }}
-                    className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 rounded-lg py-2.5 text-sm font-semibold transition"
-                  >
-                    Hiddify
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const subscriptionUrl = 'https://cdn.osmonai.com/api/v1/subscription/test';
-                      const deeplink = `streisand://install-sub?url=${encodeURIComponent(subscriptionUrl)}`;
-                      if (webApp?.openLink) {
-                        const redirectUrl = `${window.location.origin}/open?url=${encodeURIComponent(deeplink)}`;
-                        webApp.openLink(redirectUrl);
-                      } else {
-                        openDeeplink(deeplink);
-                      }
-                    }}
-                    className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 rounded-lg py-2.5 text-sm font-semibold transition"
-                  >
-                    Streisand
-                  </button>
-                </div>
+                {subscriptionUrl ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    {buildSubscriptionDeeplinks(subscriptionUrl).map((dl) => (
+                      <button
+                        key={dl.id}
+                        type="button"
+                        onClick={() => openDeeplink(dl.url)}
+                        className="inline-flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 rounded-lg py-2.5 text-sm font-semibold transition"
+                      >
+                        {dl.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  !subscriptionError && (
+                    <div className="flex items-center gap-2 text-slate-400 text-xs">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Загружаем ссылку подписки...
+                    </div>
+                  )
+                )}
               </div>
               <button
                 type="button"

@@ -97,6 +97,15 @@ export interface ActiveConnection {
   last_seen: string;
 }
 
+export interface SubscriptionTokenResponse {
+  /** Публичный 48-hex токен. Виден в URL подписки. */
+  subscription_token: string;
+  /** Готовый URL для импорта в клиент: `{base}/api/v1/subscription/{token}`. */
+  subscription_url: string;
+  /** ISO-8601 UTC. Используется для заголовка Subscription-Userinfo expire=... */
+  expires_at: string;
+}
+
 export interface ActiveConnectionsResponse {
   connections: ActiveConnection[];
   total_connections: number;
@@ -274,6 +283,15 @@ class VPNApiClient {
     return this.request<{ success: boolean; connection_id: number }>(`/vpn/devices/${connectionId}`, {
       method: 'DELETE',
     });
+  }
+
+  /**
+   * Получить персональный токен подписки + готовый URL для клиентов
+   * (Happ, Hiddify, Streisand, V2RayNG). Бросает ApiError(404) если у юзера
+   * нет активной подписки (vpn_user ещё не создан или истекла).
+   */
+  async getSubscriptionToken(): Promise<SubscriptionTokenResponse> {
+    return this.request<SubscriptionTokenResponse>('/vpn/subscription-token');
   }
 
   // ─── Payments (Telegram Stars) ────────────────────────────────────
