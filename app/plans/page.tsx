@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Check, Loader2 } from 'lucide-react';
-import { ApiError, vpnApi, type DevicePrice, type SubscriptionPlan } from '@/lib/api';
+import { ApiError, vpnApi, type DevicePrice, type PaymentProvider, type SubscriptionPlan } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useTelegram } from '@/lib/useTelegram';
 
@@ -27,6 +27,14 @@ function formatDuration(days: number): string {
   return `${days} ${pluralize(days, ['день', 'дня', 'дней'])}`;
 }
 
+// price приходит с backend как "499.00" (fmt "%.2f"). В UI без смысла
+// показывать копейки, если они нулевые.
+function formatRub(price: string): string {
+  const n = Number(price);
+  if (!Number.isFinite(n)) return price;
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+
 function pluralize(n: number, forms: [string, string, string]): string {
   const mod10 = n % 10;
   const mod100 = n % 100;
@@ -43,6 +51,7 @@ export default function PlansPage() {
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
   const [devicePricing, setDevicePricing] = useState<DevicePrice[]>([]);
   const [selectedDevices, setSelectedDevices] = useState<number>(0);
+  const [selectedProvider, setSelectedProvider] = useState<PaymentProvider>('telegram_stars');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pay, setPay] = useState<PayState>({ kind: 'idle' });
@@ -108,33 +117,51 @@ export default function PlansPage() {
       return;
     }
 
-    if (!webApp?.openInvoice) {
-      showAlert('Оплата доступна только внутри Telegram.');
+    // Ранний guard только для Stars — для WATA/YooMoney достаточно openLink
+    // (или обычного window.open как fallback вне Telegram).
+    if (selectedProvider === 'telegram_stars' && !webApp?.openInvoice) {
+      showAlert('Оплата Telegram Stars доступна только внутри Telegram.');
       return;
     }
 
     try {
       setPay({ kind: 'creating' });
-      const invoice = await vpnApi.createInvoice(selectedPlan.id, selectedPrice.max_devices);
+      const invoice = await vpnApi.createInvoice(selectedPlan.id, selectedPrice.max_devices, selectedProvider);
       setPay({ kind: 'opening' });
       hapticFeedback('medium');
 
-      webApp.openInvoice(invoice.invoice_link, (invStatus) => {
-        // paid | cancelled | failed | pending
-        if (invStatus === 'paid') {
-          hapticFeedback('success');
-          showAlert('Оплата прошла! Подписка активируется в течение пары секунд.');
+      // Для Telegram Stars используем webApp.openInvoice
+      if (selectedProvider === 'telegram_stars') {
+        if (!webApp?.openInvoice) {
+          showAlert('Оплата Telegram Stars доступна только внутри Telegram.');
           setPay({ kind: 'idle' });
-        } else if (invStatus === 'cancelled') {
-          setPay({ kind: 'idle' });
-        } else if (invStatus === 'failed') {
-          hapticFeedback('error');
-          setPay({ kind: 'error', message: 'Telegram вернул failed — попробуй ещё раз.' });
-        } else {
-          // pending — ждём webhook, перезагружать UI не надо.
-          setPay({ kind: 'idle' });
+          return;
         }
-      });
+
+        webApp.openInvoice(invoice.invoice_link, (invStatus) => {
+          if (invStatus === 'paid') {
+            hapticFeedback('success');
+            showAlert('Оплата прошла! Подписка активируется в течение пары секунд.');
+            setPay({ kind: 'idle' });
+          } else if (invStatus === 'cancelled') {
+            setPay({ kind: 'idle' });
+          } else if (invStatus === 'failed') {
+            hapticFeedback('error');
+            setPay({ kind: 'error', message: 'Telegram вернул failed — попробуй ещё раз.' });
+          } else {
+            setPay({ kind: 'idle' });
+          }
+        });
+      } else {
+        // Для YooMoney/ЮKassa открываем в браузере
+        if (webApp?.openLink) {
+          webApp.openLink(invoice.invoice_link);
+        } else {
+          window.open(invoice.invoice_link, '_blank');
+        }
+        setPay({ kind: 'idle' });
+        showAlert('Открыта страница оплаты. После оплаты подписка активируется автоматически.');
+      }
     } catch (err) {
       hapticFeedback('error');
       const msg =
@@ -193,7 +220,7 @@ export default function PlansPage() {
                   <p className="text-slate-400 text-sm">{formatDuration(plan.duration_days)}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-2xl font-bold">{plan.price_stars} ⭐</p>
+                  <p className="text-2xl font-bold">{formatRub(plan.base_price)} ₽</p>
                   <p className="text-slate-400 text-sm">за период</p>
                 </div>
               </div>
@@ -233,7 +260,7 @@ export default function PlansPage() {
                   <p className="text-sm text-slate-300">
                     {price.max_devices} {pluralize(price.max_devices, ['устройство', 'устройства', 'устройств'])}
                   </p>
-                  <p className="text-lg font-semibold">{price.price_stars} ⭐</p>
+                  <p className="text-lg font-semibold">{formatRub(price.price)} ₽</p>
                 </button>
               ))}
             </div>
@@ -242,6 +269,61 @@ export default function PlansPage() {
 
         {selectedPlan && selectedPrice && (
           <>
+            {/* Выбор способа оплаты */}
+            <div className="bg-slate-800/50 rounded-lg p-4 mb-4">
+              <p className="text-sm text-slate-400 mb-3">Способ оплаты:</p>
+              <div className="grid grid-cols-3 gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedProvider('telegram_stars');
+                    hapticFeedback('light');
+                  }}
+                  className={`p-3 rounded-lg border-2 transition ${
+                    selectedProvider === 'telegram_stars'
+                      ? 'border-blue-500 bg-blue-500/10'
+                      : 'border-slate-700 bg-slate-800/50'
+                  }`}
+                >
+                  <div className="text-2xl mb-1">⭐</div>
+                  <div className="text-sm font-semibold">Telegram Stars</div>
+                  <div className="text-xs text-slate-400 mt-1">Быстрая оплата</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedProvider('wata');
+                    hapticFeedback('light');
+                  }}
+                  className={`p-3 rounded-lg border-2 transition ${
+                    selectedProvider === 'wata'
+                      ? 'border-blue-500 bg-blue-500/10'
+                      : 'border-slate-700 bg-slate-800/50'
+                  }`}
+                >
+                  <div className="text-2xl mb-1">💳</div>
+                  <div className="text-sm font-semibold">Карта / СБП</div>
+                  <div className="text-xs text-slate-400 mt-1">Через WATA</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedProvider('yoomoney');
+                    hapticFeedback('light');
+                  }}
+                  className={`p-3 rounded-lg border-2 transition ${
+                    selectedProvider === 'yoomoney'
+                      ? 'border-blue-500 bg-blue-500/10'
+                      : 'border-slate-700 bg-slate-800/50'
+                  }`}
+                >
+                  <div className="text-2xl mb-1">🏦</div>
+                  <div className="text-sm font-semibold">YooMoney</div>
+                  <div className="text-xs text-slate-400 mt-1">Карта, кошелёк</div>
+                </button>
+              </div>
+            </div>
+
             <button
               type="button"
               onClick={handlePay}
@@ -251,7 +333,9 @@ export default function PlansPage() {
               {payBusy && <Loader2 className="w-5 h-5 animate-spin" />}
               {pay.kind === 'creating' && 'Создаём счёт...'}
               {pay.kind === 'opening' && 'Открываем оплату...'}
-              {(pay.kind === 'idle' || pay.kind === 'error') && `Оплатить ${selectedPrice.price_stars} ⭐`}
+              {(pay.kind === 'idle' || pay.kind === 'error') && (
+                `Оплатить ${formatRub(selectedPrice.price)} ₽`
+              )}
             </button>
             {pay.kind === 'error' && (
               <p className="text-red-400 text-sm mt-3 text-center">{pay.message}</p>

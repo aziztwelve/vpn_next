@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CreditCard, Globe, History, Shield, Smartphone } from 'lucide-react';
+import { CreditCard, Globe, History, Shield, Smartphone, Sparkles } from 'lucide-react';
 import { ApiError, vpnApi, type Subscription } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { TrialBanner } from '@/components/trial-banner';
@@ -90,6 +90,13 @@ export default function HomePage() {
 
         <section className="grid grid-cols-2 gap-3">
           <QuickAction href="/plans" icon={<CreditCard className="w-5 h-5" />} label="Тарифы" />
+          <QuickAction
+            href="/plans/v2"
+            icon={<Sparkles className="w-5 h-5" />}
+            label="Тарифы v2"
+            badge="NEW"
+            accent="amber"
+          />
           <QuickAction href="/connect" icon={<Globe className="w-5 h-5" />} label="Подключить" />
           <QuickAction href="/devices" icon={<Smartphone className="w-5 h-5" />} label="Устройства" />
           <QuickAction href="/history" icon={<History className="w-5 h-5" />} label="История" />
@@ -181,18 +188,34 @@ function QuickAction({
   href,
   icon,
   label,
+  badge,
+  accent = 'blue',
 }: {
   href: string;
   icon: React.ReactNode;
   label: string;
+  /** Маленький бейдж справа (напр. "NEW"). */
+  badge?: string;
+  /** Цвет иконки/акцента. */
+  accent?: 'blue' | 'amber';
 }) {
+  const iconColor = accent === 'amber' ? 'text-amber-400' : 'text-blue-400';
+  const borderColor =
+    accent === 'amber'
+      ? 'border-amber-500/40 hover:border-amber-400/60'
+      : 'border-slate-800 hover:border-slate-700';
   return (
     <Link
       href={href}
-      className="bg-slate-900 hover:bg-slate-800 rounded-lg p-4 flex items-center gap-3 transition border border-slate-800 hover:border-slate-700"
+      className={`bg-slate-900 hover:bg-slate-800 rounded-lg p-4 flex items-center gap-3 transition border ${borderColor}`}
     >
-      <span className="text-blue-400">{icon}</span>
-      <span className="font-medium">{label}</span>
+      <span className={iconColor}>{icon}</span>
+      <span className="font-medium flex-1">{label}</span>
+      {badge && (
+        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-400 text-slate-900">
+          {badge}
+        </span>
+      )}
     </Link>
   );
 }

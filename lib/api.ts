@@ -26,7 +26,9 @@ export interface SubscriptionPlan {
   name: string;
   duration_days: number;
   max_devices: number;
-  // base_price — legacy (рубли, decimal-строка). Для UI используем price_stars.
+  // base_price — цена в рублях (decimal-строка, "499.00"). Primary для UI.
+  // price_stars считается на бэке из rub/rate — используется только для
+  // инвойса Telegram Stars.
   base_price: string;
   price_stars: number;
   is_active: boolean;
@@ -34,8 +36,8 @@ export interface SubscriptionPlan {
 
 export interface DevicePrice {
   max_devices: number;
-  price: string;       // decimal-строка рубли (legacy)
-  price_stars: number; // фактическая цена для оплаты в Stars
+  price: string;       // decimal-строка рубли — primary для UI
+  price_stars: number; // derived из rub/rate — только для инвойса Telegram Stars
   plan_name: string;
 }
 
@@ -114,6 +116,10 @@ export interface ActiveConnectionsResponse {
 
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded' | string;
 
+/** Все поддерживаемые платёжные провайдеры. Держим union, чтобы TS ловил опечатки
+ *  (selectedProvider === 'wata' вместо 'WATA'). Бэкенд принимает эти же строки. */
+export type PaymentProvider = 'telegram_stars' | 'wata' | 'yoomoney';
+
 export interface Payment {
   id: number;
   user_id: number;
@@ -131,6 +137,12 @@ export interface CreateInvoiceResponse {
   payment_id: number;
   invoice_link: string;
   amount_stars: number;
+}
+
+export interface CreateInvoiceOptions {
+  provider?: PaymentProvider;
+  // TODO(plans-v2): promoCode и autoRenew — добавить сюда после реализации
+  // бэкенд-ручек. См. docs/tasks/09-plans-v2.md (Промокоды, Автопродление).
 }
 
 // ───── Ошибки ───────────────────────────────────────────────────────
@@ -211,12 +223,10 @@ class VPNApiClient {
     }
 
     if (!response.ok) {
-      const message =
-        (body && typeof body === 'object' && 'message' in body && typeof (body as any).message === 'string')
-          ? (body as any).message
-          : (body && typeof body === 'object' && 'error' in body && typeof (body as any).error === 'string')
-            ? (body as any).error
-            : `HTTP ${response.status}`;
+      const asObj = body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
+      const pickString = (key: string): string | null =>
+        asObj && typeof asObj[key] === 'string' ? (asObj[key] as string) : null;
+      const message = pickString('message') ?? pickString('error') ?? `HTTP ${response.status}`;
       throw new ApiError(response.status, message, body);
     }
 
@@ -294,14 +304,27 @@ class VPNApiClient {
     return this.request<SubscriptionTokenResponse>('/vpn/subscription-token');
   }
 
-  // ─── Payments (Telegram Stars) ────────────────────────────────────
+  // ─── Payments (Telegram Stars / WATA / YooMoney) ──────────────────
 
   /**
    * Создать инвойс на оплату. Фронт потом открывает invoice_link через
-   * Telegram.WebApp.openInvoice(link, cb).
+   * Telegram.WebApp.openInvoice(link, cb) (для Stars) или openLink (WATA/YooMoney).
+   *
+   * Второй аргумент — либо строка-провайдер (обратная совместимость), либо
+   * объект опций {provider}. Промокод и автопродление — см. TODO(plans-v2).
    */
-  async createInvoice(planId: number, maxDevices: number): Promise<CreateInvoiceResponse> {
-    return this.request<CreateInvoiceResponse>('/payments', {
+  async createInvoice(
+    planId: number,
+    maxDevices: number,
+    providerOrOptions: PaymentProvider | CreateInvoiceOptions = 'telegram_stars',
+  ): Promise<CreateInvoiceResponse> {
+    const provider =
+      typeof providerOrOptions === 'string'
+        ? providerOrOptions
+        : providerOrOptions.provider ?? 'telegram_stars';
+
+    const params = new URLSearchParams({ provider });
+    return this.request<CreateInvoiceResponse>(`/payments?${params}`, {
       method: 'POST',
       body: JSON.stringify({ plan_id: planId, max_devices: maxDevices }),
     });
@@ -310,6 +333,13 @@ class VPNApiClient {
   async listPayments(limit = 50, offset = 0): Promise<{ payments: Payment[] }> {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     return this.request<{ payments: Payment[] }>(`/payments?${params}`);
+  }
+
+  /** Статус одного платежа — для /payment/pending (poll'им до paid/failed).
+   *  TODO(plans-v2, backend): сделать отдельный `GET /payments/:id`; пока фильтруем listPayments. */
+  async getPaymentStatus(paymentId: number): Promise<Payment | null> {
+    const { payments } = await this.listPayments(100, 0);
+    return payments.find((p) => p.id === paymentId) ?? null;
   }
 }
 
