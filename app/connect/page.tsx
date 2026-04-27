@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { QRCodeSVG } from 'qrcode.react';
 import {
@@ -8,128 +8,105 @@ import {
   Check,
   Copy,
   CreditCard,
-  Globe,
   Loader2,
   RefreshCw,
-  ShieldAlert,
   Smartphone,
 } from 'lucide-react';
-import {
-  ApiError,
-  vpnApi,
-  type VLESSLinkResponse,
-  type VPNServer,
-} from '@/lib/api';
+import { ApiError, vpnApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useTelegram } from '@/lib/useTelegram';
 
-// device_id — это то, за что биндится слот лимита устройств.
-// Генерим один раз на устройство, храним в localStorage.
-const DEVICE_ID_KEY = 'vpn_device_id';
-
-function getOrCreateDeviceId(): string {
-  if (typeof window === 'undefined') return '';
-  let id = localStorage.getItem(DEVICE_ID_KEY);
-  if (!id) {
-    const rand =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2) + Date.now().toString(36);
-    id = `web-${rand}`;
-    localStorage.setItem(DEVICE_ID_KEY, id);
-  }
-  return id;
-}
-
-type LinkState =
-  | { kind: 'idle' }
+// Состояние блока с QR/ссылкой подписки. Источник — GET /vpn/subscription-token.
+// Сам vless:// больше не дёргается на этой странице: subscription_url ведёт
+// на универсальный конфиг подписки (Happ/Hiddify/V2RayTun/Streisand сами
+// разбираются как его раскрутить).
+type SubState =
   | { kind: 'loading' }
-  | { kind: 'ok'; data: VLESSLinkResponse }
-  | { kind: 'limit'; current: number; max: number; rawMessage: string }
+  | { kind: 'ok'; url: string }
+  | { kind: 'no_subscription' }
   | { kind: 'error'; message: string };
-
-/** Парсит "device limit exceeded: 1/2 devices active" → {current: 1, max: 2}.
- *  Если не распарсилось — возвращает {0, 0}, UI просто скроет счётчик. */
-function parseDeviceLimitMessage(msg: string): { current: number; max: number } {
-  const m = msg.match(/(\d+)\s*\/\s*(\d+)/);
-  if (!m) return { current: 0, max: 0 };
-  return { current: parseInt(m[1], 10), max: parseInt(m[2], 10) };
-}
 
 export default function ConnectPage() {
   const { status, error: authError } = useAuth();
   const { hapticFeedback, showAlert, webApp } = useTelegram();
 
-  const [servers, setServers] = useState<VPNServer[]>([]);
-  const [serversLoading, setServersLoading] = useState(true);
-  const [serversError, setServersError] = useState<string | null>(null);
-
-  const [selectedServerId, setSelectedServerId] = useState<number | null>(null);
-  const [link, setLink] = useState<LinkState>({ kind: 'idle' });
+  const [sub, setSub] = useState<SubState>({ kind: 'loading' });
   const [copied, setCopied] = useState(false);
+  const [selectedOS, setSelectedOS] = useState<string>('ios');
+  const [showDownloadInfo, setShowDownloadInfo] = useState(false);
 
-  // subscription_url: персональная ссылка подписки для Happ/Hiddify/Streisand.
-  // Грузим один раз после авторизации. Если vpn_user ещё не создан (no_active_subscription)
-  // — подставляем null, кнопки показывают ссылку на `/subscribe`.
-  const [subscriptionUrl, setSubscriptionUrl] = useState<string | null>(null);
-  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
-
-  const deviceId = useMemo(() => getOrCreateDeviceId(), []);
-
-  // Загрузка серверов.
+  // Определяем ОС автоматически
   useEffect(() => {
-    if (status !== 'authenticated') return;
-    let cancelled = false;
-    setServersLoading(true);
-    setServersError(null);
+    if (typeof window === 'undefined') return;
+    const ua = navigator.userAgent.toLowerCase();
+    if (ua.includes('android')) {
+      setSelectedOS('android');
+    } else if (ua.includes('iphone') || ua.includes('ipad')) {
+      setSelectedOS('ios');
+    } else if (ua.includes('win')) {
+      setSelectedOS('windows');
+    } else if (ua.includes('linux')) {
+      setSelectedOS('linux');
+    }
+  }, []);
 
-    (async () => {
-      try {
-        const list = await vpnApi.listServers(true);
-        if (cancelled) return;
-        setServers(list ?? []);
-        if (list && list.length > 0) {
-          // Сервер с минимальной загрузкой — лучший дефолт.
-          const best = [...list].sort(
-            (a, b) => (a.load_percent ?? 0) - (b.load_percent ?? 0)
-          )[0];
-          setSelectedServerId(best.id);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setServersError(err instanceof Error ? err.message : 'Ошибка загрузки');
-        }
-      } finally {
-        if (!cancelled) setServersLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
+  const getAppLink = (os: string) => {
+    const links: Record<string, string> = {
+      ios: 'https://apps.apple.com/tj/app/happ-proxy-utility/id6504287215',
+      android: 'https://play.google.com/store/apps/details?id=com.happ.vpn',
+      windows: 'https://github.com/happ-vpn/releases/download/v1.0.0/Happ-Setup.exe',
+      linux: 'https://github.com/happ-vpn/releases/download/v1.0.0/Happ-Linux.AppImage',
     };
-  }, [status]);
+    return links[os] || links.ios;
+  };
 
-  // Загрузка subscription URL (один раз после auth). 404 — нет активной
-  // подписки, не ошибка, просто скрываем блок.
-  //
+  const getAlternativeApps = () => [
+    { name: 'Happ', url: 'https://apps.apple.com/tj/app/happ-proxy-utility/id6504287215' },
+    { name: 'V2RayTun', url: 'https://apps.apple.com/tj/app/v2raytun/id6476628951' },
+    { name: 'Hiddify', url: 'https://apps.apple.com/tj/app/hiddify-proxy-vpn/id6596777532' },
+    { name: 'INCY', url: 'https://apps.apple.com/tj/app/incy/id6756943388' },
+  ];
+
+  // Загрузка subscription URL после auth.
   // URL берём из ответа бэка: `subscription_url`. Он строится в gateway из
   // env PUBLIC_BASE_URL = https://cdn.osmonai.com. Нельзя полагаться на
   // window.location.origin, т.к. Mini App может быть открыт через dev-URL
   // (127.0.0.1:<port>), а Happ на телефоне не достучится до этого хоста.
+  // 404 от бэка → no_subscription (не ошибка, юзер просто ещё не оплатил).
+  const fetchSubscription = async () => {
+    setSub({ kind: 'loading' });
+    setCopied(false);
+    try {
+      const resp = await vpnApi.getSubscriptionToken();
+      setSub({ kind: 'ok', url: resp.subscription_url });
+      hapticFeedback('success');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setSub({ kind: 'no_subscription' });
+        return;
+      }
+      const msg = err instanceof Error ? err.message : 'Не удалось получить ссылку';
+      setSub({ kind: 'error', message: msg });
+      hapticFeedback('error');
+    }
+  };
+
   useEffect(() => {
     if (status !== 'authenticated') return;
     let cancelled = false;
     (async () => {
       try {
         const resp = await vpnApi.getSubscriptionToken();
-        if (!cancelled) setSubscriptionUrl(resp.subscription_url);
+        if (cancelled) return;
+        setSub({ kind: 'ok', url: resp.subscription_url });
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 404) {
-          setSubscriptionError('Нет активной подписки');
+          setSub({ kind: 'no_subscription' });
           return;
         }
-        setSubscriptionError(err instanceof Error ? err.message : 'Ошибка');
+        const msg = err instanceof Error ? err.message : 'Не удалось получить ссылку';
+        setSub({ kind: 'error', message: msg });
       }
     })();
     return () => {
@@ -137,67 +114,10 @@ export default function ConnectPage() {
     };
   }, [status]);
 
-  const fetchLink = useCallback(async () => {
-    if (!selectedServerId || !deviceId) return;
-    setLink({ kind: 'loading' });
-    setCopied(false);
-    try {
-      const data = await vpnApi.getVLESSLink(selectedServerId, deviceId);
-      setLink({ kind: 'ok', data });
-      hapticFeedback('success');
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 429 && err.code === 'device_limit_exceeded') {
-        const { current, max } = parseDeviceLimitMessage(err.message);
-        setLink({ kind: 'limit', current, max, rawMessage: err.message });
-        hapticFeedback('warning');
-      } else {
-        const msg = err instanceof Error ? err.message : 'Не удалось получить ключ';
-        setLink({ kind: 'error', message: msg });
-        hapticFeedback('error');
-      }
-    }
-  }, [selectedServerId, deviceId, hapticFeedback]);
-
-  // Как только выбран сервер и юзер авторизован — запрашиваем ключ.
-  useEffect(() => {
-    if (status !== 'authenticated') return;
-    if (selectedServerId == null) return;
-    if (!deviceId) return;
-    
-    let cancelled = false;
-    setLink({ kind: 'loading' });
-    setCopied(false);
-    
-    (async () => {
-      try {
-        const data = await vpnApi.getVLESSLink(selectedServerId, deviceId);
-        if (cancelled) return;
-        setLink({ kind: 'ok', data });
-        hapticFeedback('success');
-      } catch (err) {
-        if (cancelled) return;
-        if (err instanceof ApiError && err.status === 429 && err.code === 'device_limit_exceeded') {
-          const { current, max } = parseDeviceLimitMessage(err.message);
-          setLink({ kind: 'limit', current, max, rawMessage: err.message });
-          hapticFeedback('warning');
-        } else {
-          const msg = err instanceof Error ? err.message : 'Не удалось получить ключ';
-          setLink({ kind: 'error', message: msg });
-          hapticFeedback('error');
-        }
-      }
-    })();
-    
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, selectedServerId, deviceId]);
-
   const handleCopy = async () => {
-    if (link.kind !== 'ok') return;
+    if (sub.kind !== 'ok') return;
     try {
-      await navigator.clipboard.writeText(link.data.vless_link);
+      await navigator.clipboard.writeText(sub.url);
       setCopied(true);
       hapticFeedback('success');
       setTimeout(() => setCopied(false), 2000);
@@ -277,7 +197,7 @@ export default function ConnectPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 p-6">
+    <div className="min-h-screen bg-slate-950 text-slate-50 p-6 pb-24">
       <div className="max-w-2xl mx-auto space-y-6">
         <div className="flex items-center">
           <Link href="/" className="mr-4" aria-label="Назад">
@@ -286,40 +206,94 @@ export default function ConnectPage() {
           <h1 className="text-2xl font-bold">Подключение</h1>
         </div>
 
-        <section>
-          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-            <Globe className="w-5 h-5 text-blue-400" /> Сервер
-          </h2>
-          {serversLoading && <p className="text-slate-400">Загружаем список серверов...</p>}
-          {serversError && <p className="text-red-400">{serversError}</p>}
-          {!serversLoading && !serversError && servers.length === 0 && (
-            <p className="text-slate-400">Серверов пока нет. Зайди позже.</p>
-          )}
-          <div className="grid gap-2">
-            {servers.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => {
-                  setSelectedServerId(s.id);
-                  hapticFeedback('light');
-                }}
-                className={`flex items-center justify-between bg-slate-900 rounded-lg p-4 border-2 transition text-left ${
-                  selectedServerId === s.id
-                    ? 'border-blue-500'
-                    : 'border-slate-800 hover:border-slate-700'
-                }`}
+        {/* Select для выбора ОС */}
+        <section className="bg-slate-900 rounded-lg p-4">
+          <select
+            value={selectedOS}
+            onChange={(e) => setSelectedOS(e.target.value)}
+            className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="ios">iOS (iPhone/iPad)</option>
+            <option value="android">Android</option>
+            <option value="windows">Windows</option>
+            <option value="linux">Linux</option>
+          </select>
+        </section>
+
+        {/* Альтернативные приложения для iOS */}
+        {selectedOS === 'ios' && (
+          <section className="bg-slate-900 rounded-lg p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-slate-300">Приложения для iOS</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {getAlternativeApps().map((app) => (
+                <a
+                  key={app.name}
+                  href={app.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center bg-slate-800 hover:bg-slate-700 rounded-lg py-2.5 text-sm font-semibold transition"
+                >
+                  {app.name}
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Раскрывающийся блок со ссылкой на скачивание */}
+        <section className="bg-slate-900 rounded-lg overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowDownloadInfo(!showDownloadInfo)}
+            className="w-full flex items-center justify-between p-4 hover:bg-slate-800 transition"
+          >
+            <span className="text-sm font-semibold text-slate-300">Прямая ссылка на скачивание</span>
+            <span className="text-slate-400">{showDownloadInfo ? '▼' : '▶'}</span>
+          </button>
+          {showDownloadInfo && (
+            <div className="p-4 pt-0 space-y-3">
+              <p className="text-slate-400 text-sm">
+                Скачайте приложение напрямую для {selectedOS === 'ios' ? 'iOS' : selectedOS === 'android' ? 'Android' : selectedOS === 'linux' ? 'Linux' : 'Windows'}
+              </p>
+              <a
+                href={getAppLink(selectedOS)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 rounded-lg p-3 transition font-medium"
               >
-                <div>
-                  <p className="font-medium">
-                    {flagEmoji(s.country_code)} {s.name}
-                  </p>
-                  <p className="text-slate-400 text-sm">{s.location}</p>
-                </div>
-                <LoadBadge percent={s.load_percent ?? 0} />
-              </button>
-            ))}
-          </div>
+                Перейти к скачиванию
+              </a>
+            </div>
+          )}
+        </section>
+
+        {/* Или открой в приложении */}
+        <section className="bg-slate-900 rounded-lg p-4 space-y-3">
+          <p className="text-slate-400 text-sm">Или открой в приложении:</p>
+          {sub.kind === 'no_subscription' && (
+            <p className="text-rose-300/80 text-xs">
+              Нет активной подписки. Купи подписку чтобы получить ссылку импорта.
+            </p>
+          )}
+          {sub.kind === 'ok' ? (
+            <div className="grid grid-cols-2 gap-2">
+              {buildSubscriptionDeeplinks(sub.url).map((dl) => (
+                <button
+                  key={dl.id}
+                  type="button"
+                  onClick={() => openDeeplink(dl.url)}
+                  className="inline-flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 rounded-lg py-2.5 text-sm font-semibold transition"
+                >
+                  {dl.label}
+                </button>
+              ))}
+            </div>
+          ) : sub.kind === 'loading' ? (
+            <div className="flex items-center gap-2 text-slate-400 text-xs">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Загружаем ссылку подписки...
+            </div>
+          ) : null}
         </section>
 
         <section>
@@ -327,63 +301,33 @@ export default function ConnectPage() {
             <Smartphone className="w-5 h-5 text-blue-400" /> Твой ключ
           </h2>
 
-          {link.kind === 'idle' && (
-            <p className="text-slate-400 text-sm">Выбери сервер, чтобы получить ссылку.</p>
-          )}
-
-          {link.kind === 'loading' && (
+          {sub.kind === 'loading' && (
             <div className="flex items-center gap-2 text-slate-400">
-              <Loader2 className="w-4 h-4 animate-spin" /> Запрашиваем VLESS-ссылку...
+              <Loader2 className="w-4 h-4 animate-spin" /> Запрашиваем ссылку подписки...
             </div>
           )}
 
-          {link.kind === 'limit' && (
+          {sub.kind === 'no_subscription' && (
             <div className="bg-yellow-500/10 border border-yellow-500/40 rounded-lg p-4 space-y-4">
-              <div className="flex items-start gap-3">
-                <ShieldAlert className="w-6 h-6 text-yellow-400 shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <p className="font-semibold text-yellow-100">Достигнут лимит устройств</p>
-                  {link.max > 0 && (
-                    <p className="text-sm text-yellow-200/90 mt-1">
-                      Подключено <span className="font-mono font-semibold">{link.current}/{link.max}</span>.
-                      Отключи одно из активных устройств — или купи тариф с большим лимитом.
-                    </p>
-                  )}
-                  {link.max === 0 && (
-                    <p className="text-sm text-yellow-200/90 mt-1">{link.rawMessage}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <Link
-                  href="/devices"
-                  className="inline-flex items-center justify-center gap-2 bg-yellow-500 hover:bg-yellow-400 text-slate-900 rounded-lg px-4 py-2.5 text-sm font-semibold transition"
-                >
-                  <Smartphone className="w-4 h-4" />
-                  Мои устройства
-                </Link>
-                <Link
-                  href="/plans"
-                  className="inline-flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg px-4 py-2.5 text-sm font-semibold transition border border-slate-700"
-                >
-                  <CreditCard className="w-4 h-4" />
-                  Тарифы
-                </Link>
-              </div>
-
-              <p className="text-xs text-yellow-200/60">
-                Слот освободится автоматически через 5 минут после того, как устройство перестанет обновлять подключение.
+              <p className="text-sm text-yellow-100">
+                Нет активной подписки — купи тариф, чтобы получить ссылку для подключения.
               </p>
+              <Link
+                href="/plans"
+                className="inline-flex items-center justify-center gap-2 bg-yellow-500 hover:bg-yellow-400 text-slate-900 rounded-lg px-4 py-2.5 text-sm font-semibold transition"
+              >
+                <CreditCard className="w-4 h-4" />
+                Тарифы
+              </Link>
             </div>
           )}
 
-          {link.kind === 'error' && (
+          {sub.kind === 'error' && (
             <div className="bg-red-500/10 border border-red-500/40 text-red-300 rounded-lg p-4">
-              <p className="text-sm mb-3">{link.message}</p>
+              <p className="text-sm mb-3">{sub.message}</p>
               <button
                 type="button"
-                onClick={() => void fetchLink()}
+                onClick={() => void fetchSubscription()}
                 className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 rounded-lg px-4 py-2 text-sm transition"
               >
                 <RefreshCw className="w-4 h-4" /> Повторить
@@ -391,76 +335,44 @@ export default function ConnectPage() {
             </div>
           )}
 
-          {link.kind === 'ok' && (
+          {sub.kind === 'ok' && (
             <div className="bg-slate-900 rounded-lg p-6 space-y-5">
-              <div className="flex justify-between items-center text-sm text-slate-400">
-                <span>
-                  Устройства: {link.data.current_devices}/{link.data.max_devices}
-                </span>
+              <div className="flex justify-end items-center text-sm text-slate-400">
                 <button
                   type="button"
-                  onClick={() => void fetchLink()}
+                  onClick={() => void fetchSubscription()}
                   className="inline-flex items-center gap-1 hover:text-slate-200"
                 >
                   <RefreshCw className="w-3 h-3" /> обновить
                 </button>
               </div>
 
-              {/* QR — самый универсальный способ. Сканируется любым VLESS-клиентом
-                  (Happ, V2RayTun, Hiddify, NekoBox, ...) без привязки к ОС/схеме. */}
+              {/* QR подписки — клиенты (Happ/Hiddify/V2RayTun/Streisand) сами
+                  стянут полный конфиг по этой ссылке и подхватят все сервера
+                  + актуальные ключи Reality. */}
               <div className="flex flex-col items-center gap-3 bg-white rounded-lg p-4">
                 <QRCodeSVG
-                  value={link.data.vless_link}
+                  value={sub.url}
                   size={220}
                   level="M"
                   marginSize={2}
                   className="rounded"
                 />
                 <p className="text-slate-700 text-xs text-center max-w-[220px]">
-                  Наведи камеру или VPN-клиент на QR — он импортирует подключение сам.
+                  Наведи камеру или VPN-клиент на QR — он импортирует подписку сам.
                 </p>
               </div>
 
               <details className="bg-slate-950 border border-slate-800 rounded-lg p-3">
                 <summary className="text-slate-400 text-xs cursor-pointer select-none">
-                  Показать VLESS-ссылку
+                  Показать ссылку подписки
                 </summary>
                 <p className="text-slate-200 text-xs font-mono break-all leading-relaxed mt-2">
-                  {link.data.vless_link}
+                  {sub.url}
                 </p>
               </details>
 
-              <div>
-                <p className="text-slate-400 text-xs mb-2">Или открой в приложении:</p>
 
-                {subscriptionError && !subscriptionUrl && (
-                  <p className="text-rose-300/80 text-xs">
-                    {subscriptionError}. Купи подписку чтобы получить ссылку импорта.
-                  </p>
-                )}
-
-                {subscriptionUrl ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    {buildSubscriptionDeeplinks(subscriptionUrl).map((dl) => (
-                      <button
-                        key={dl.id}
-                        type="button"
-                        onClick={() => openDeeplink(dl.url)}
-                        className="inline-flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 rounded-lg py-2.5 text-sm font-semibold transition"
-                      >
-                        {dl.label}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  !subscriptionError && (
-                    <div className="flex items-center gap-2 text-slate-400 text-xs">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Загружаем ссылку подписки...
-                    </div>
-                  )
-                )}
-              </div>
               <button
                 type="button"
                 onClick={handleCopy}

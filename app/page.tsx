@@ -2,10 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CreditCard, Globe, History, Shield, Smartphone, Sparkles } from 'lucide-react';
+import { CreditCard, Globe, History, Shield, Smartphone } from 'lucide-react';
 import { ApiError, vpnApi, type Subscription } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { TrialBanner } from '@/components/trial-banner';
+
+// Tokens (синхронно с /connect2):
+//   page  — bg-slate-950
+//   card  — bg-slate-900 + border-slate-800 (hover:border-slate-700)
+//   active state border — border-green-500/40
+//   error state border  — border-red-500/40
+//   accent — emerald-400 (точки, иконки, outline-кнопки)
 
 type ActiveState =
   | { kind: 'idle' }
@@ -55,8 +62,8 @@ export default function HomePage() {
   const greetingName = user?.first_name || user?.username || 'друг';
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 p-6">
-      <div className="max-w-4xl mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-950 text-slate-50 pb-24">
+      <div className="max-w-2xl mx-auto px-4 pt-6 space-y-4">
         <header>
           <h1 className="text-3xl font-bold">VPN</h1>
           <p className="text-slate-400 text-sm mt-1">Быстро, без логов, по Telegram Stars.</p>
@@ -64,8 +71,11 @@ export default function HomePage() {
 
         <TrialBanner />
 
-        <section className="bg-slate-900 rounded-lg p-6">
-          {status === 'loading' && <p className="text-slate-400">Авторизуемся через Telegram...</p>}
+        {/* Greeting / auth status */}
+        <section className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+          {status === 'loading' && (
+            <p className="text-slate-400 text-sm">Авторизуемся через Telegram...</p>
+          )}
           {status === 'authenticated' && (
             <>
               <h2 className="text-xl font-semibold">Привет, {greetingName}!</h2>
@@ -77,27 +87,19 @@ export default function HomePage() {
           {(status === 'unauthenticated' || status === 'error') && (
             <>
               <h2 className="text-xl font-semibold">Нужен Telegram</h2>
-              <p className="text-yellow-300 text-sm mt-2">
+              <p className="text-amber-300 text-sm mt-2">
                 {authError ?? 'Открой приложение из Telegram, чтобы продолжить.'}
               </p>
             </>
           )}
         </section>
 
-        <section>
-          <ActiveSubscriptionCard state={active} />
-        </section>
+        <ActiveSubscriptionCard state={active} />
 
         <section className="grid grid-cols-2 gap-3">
           <QuickAction href="/plans" icon={<CreditCard className="w-5 h-5" />} label="Тарифы" />
-          <QuickAction
-            href="/plans/v2"
-            icon={<Sparkles className="w-5 h-5" />}
-            label="Тарифы v2"
-            badge="NEW"
-            accent="amber"
-          />
           <QuickAction href="/connect" icon={<Globe className="w-5 h-5" />} label="Подключить" />
+          <QuickAction href="/connect2" icon={<Globe className="w-5 h-5" />} label="Подключить 2" />
           <QuickAction href="/devices" icon={<Smartphone className="w-5 h-5" />} label="Устройства" />
           <QuickAction href="/history" icon={<History className="w-5 h-5" />} label="История" />
         </section>
@@ -111,39 +113,43 @@ export default function HomePage() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// Subcomponents
+// ─────────────────────────────────────────────────────────────
+
 function ActiveSubscriptionCard({ state }: { state: ActiveState }) {
   if (state.kind === 'idle' || state.kind === 'loading') {
     return (
-      <div className="bg-slate-900 rounded-lg p-6 animate-pulse">
+      <section className="rounded-xl border border-slate-800 bg-slate-900 p-5 animate-pulse">
         <div className="h-5 w-32 bg-slate-800 rounded mb-3" />
         <div className="h-4 w-48 bg-slate-800 rounded" />
-      </div>
+      </section>
     );
   }
 
   if (state.kind === 'error') {
     return (
-      <div className="bg-slate-900 rounded-lg p-6 border border-red-500/40">
-        <h3 className="text-lg font-semibold mb-1">Подписка</h3>
+      <section className="rounded-xl border border-red-500/40 bg-slate-900 p-5">
+        <h3 className="font-semibold mb-1">Подписка</h3>
         <p className="text-red-400 text-sm">{state.message}</p>
-      </div>
+      </section>
     );
   }
 
   if (state.kind === 'none') {
     return (
-      <div className="bg-slate-900 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-1">Подписки пока нет</h3>
-        <p className="text-slate-400 text-sm mb-4">
+      <section className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+        <h3 className="font-semibold mb-1">Подписки пока нет</h3>
+        <p className="text-slate-400 text-sm mb-4 leading-relaxed">
           Выбери тариф и оплати через Telegram Stars. Ключ появится сразу после оплаты.
         </p>
         <Link
           href="/plans"
-          className="inline-block bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-4 py-2 text-sm font-semibold transition"
+          className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-400/50 hover:border-emerald-400 hover:bg-emerald-400/5 text-emerald-300 font-medium py-3 transition"
         >
           Выбрать тариф
         </Link>
-      </div>
+      </section>
     );
   }
 
@@ -152,26 +158,29 @@ function ActiveSubscriptionCard({ state }: { state: ActiveState }) {
   const expiresAt = new Date(sub.expires_at);
   const daysLeft = Math.max(
     0,
-    Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)),
   );
 
   return (
-    <div className="bg-slate-900 rounded-lg p-6 border border-green-500/40">
-      <div className="flex justify-between items-start mb-3">
-        <div>
-          <h3 className="text-lg font-semibold">{sub.plan_name || 'Подписка'}</h3>
-          <p className="text-green-400 text-sm">Активна</p>
+    <section className="rounded-xl border border-green-500/40 bg-slate-900 p-5">
+      <div className="flex justify-between items-start mb-4">
+        <div className="min-w-0">
+          <h3 className="font-semibold truncate">{sub.plan_name || 'Подписка'}</h3>
+          <p className="text-emerald-400 text-sm flex items-center gap-1.5 mt-0.5">
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-400" />
+            Активна
+          </p>
         </div>
-        <div className="text-right">
-          <p className="text-2xl font-bold">{daysLeft}</p>
-          <p className="text-slate-400 text-xs">дней осталось</p>
+        <div className="text-right shrink-0">
+          <p className="text-2xl font-bold leading-none">{daysLeft}</p>
+          <p className="text-slate-400 text-xs mt-1">дней осталось</p>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3 text-sm">
         <InfoRow label="Устройств" value={String(sub.max_devices)} />
         <InfoRow label="Истекает" value={expiresAt.toLocaleDateString('ru-RU')} />
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -179,7 +188,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <p className="text-slate-400 text-xs">{label}</p>
-      <p className="text-slate-200">{value}</p>
+      <p className="text-slate-100">{value}</p>
     </div>
   );
 }
@@ -189,30 +198,24 @@ function QuickAction({
   icon,
   label,
   badge,
-  accent = 'blue',
 }: {
   href: string;
   icon: React.ReactNode;
   label: string;
   /** Маленький бейдж справа (напр. "NEW"). */
   badge?: string;
-  /** Цвет иконки/акцента. */
-  accent?: 'blue' | 'amber';
 }) {
-  const iconColor = accent === 'amber' ? 'text-amber-400' : 'text-blue-400';
-  const borderColor =
-    accent === 'amber'
-      ? 'border-amber-500/40 hover:border-amber-400/60'
-      : 'border-slate-800 hover:border-slate-700';
   return (
     <Link
       href={href}
-      className={`bg-slate-900 hover:bg-slate-800 rounded-lg p-4 flex items-center gap-3 transition border ${borderColor}`}
+      className="rounded-xl border border-slate-800 hover:border-slate-700 bg-slate-900 p-4 flex items-center gap-3 transition"
     >
-      <span className={iconColor}>{icon}</span>
-      <span className="font-medium flex-1">{label}</span>
+      <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-400/10 text-emerald-400 shrink-0">
+        {icon}
+      </span>
+      <span className="font-medium flex-1 truncate">{label}</span>
       {badge && (
-        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-400 text-slate-900">
+        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-400 text-slate-900">
           {badge}
         </span>
       )}
