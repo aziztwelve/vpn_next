@@ -2,26 +2,27 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CreditCard, Globe, Shield, Smartphone, Users } from 'lucide-react';
+import {
+  ArrowRight,
+  CreditCard,
+  Globe,
+  History,
+  Shield,
+  Smartphone,
+  Sparkles,
+  Users,
+} from 'lucide-react';
 import { ApiError, vpnApi, type Subscription } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { TrialBanner } from '@/components/trial-banner';
 
 // Tokens (синхронно с /connect):
-//   page   — bg-slate-950
-//   card   — bg-slate-800/50 + border-slate-700/50 (hover:border-slate-600)
-//   accent — cyan-400 (основной), emerald-400 (активная подписка / "ок")
-//   error border — border-red-500/40
-//   radius — rounded-2xl
+//   page    — bg-slate-950
+//   card    — bg-slate-800/50 + border-slate-700/50 (hover:border-slate-600)
+//   accent  — cyan-400 (основной), emerald-400 (активная подписка), violet-400 (реферал)
+//   error   — border-red-500/40
+//   radius  — rounded-2xl
 
-// ─────────────────────────────────────────────────────────────
-// Closed beta gate
-// ─────────────────────────────────────────────────────────────
-// Главная пока закрыта для всех кроме whitelisted username'ов —
-// бэкенд платежей ещё не подключён. Когда платёжная интеграция будет
-// готова, удали PRIVATE_BETA_USERNAMES + соответствующий early-return
-// в HomePage (или сделай Set пустым — тогда условие false для всех
-// и гейт автоматом отключится).
 type ActiveState =
   | { kind: 'idle' }
   | { kind: 'loading' }
@@ -67,48 +68,65 @@ export default function HomePage() {
     };
   }, [status]);
 
-  const greetingName = user?.first_name || user?.username || 'друг';
-
-  // Closed beta убрана - доступ для всех
+  const greetingName = user?.first_name || user?.username || null;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 pb-24">
-      <div className="max-w-2xl mx-auto px-4 pt-5 space-y-3">
+      <div className="max-w-2xl mx-auto px-4 pt-5 space-y-4">
+        {/* ── Header + greeting в одном блоке ───────────────────────── */}
         <header>
-          <h1 className="text-xl font-semibold">VPN</h1>
-          <p className="text-slate-400 text-xs mt-0.5">Быстро, без логов, по Telegram Stars.</p>
+          <h1 className="text-xl font-semibold">
+            {status === 'authenticated' && greetingName
+              ? <>Привет, {greetingName} <span className="inline-block">👋</span></>
+              : 'MaydaVPN'}
+          </h1>
+          <p className="text-slate-400 text-xs mt-0.5">
+            {status === 'authenticated'
+              ? 'Быстро, без логов, по Telegram Stars'
+              : 'Telegram Mini App для приватного интернета'}
+          </p>
         </header>
 
         <TrialBanner />
 
-        {/* Greeting / auth status */}
-        <section className="rounded-2xl border border-slate-700/50 bg-slate-800/50 p-4">
-          {status === 'loading' && (
-            <p className="text-slate-400 text-xs">Авторизуемся через Telegram...</p>
-          )}
-          {status === 'authenticated' && (
-            <h2 className="text-base font-semibold">Привет, {greetingName}!</h2>
-          )}
-          {(status === 'unauthenticated' || status === 'error') && (
-            <>
-              <h2 className="text-base font-semibold">Нужен Telegram</h2>
-              <p className="text-amber-300 text-xs mt-1.5">
-                {authError ?? 'Открой приложение из Telegram, чтобы продолжить.'}
-              </p>
-            </>
-          )}
-        </section>
+        {/* ── Auth ошибка / unauthenticated ───────────────────────── */}
+        {(status === 'unauthenticated' || status === 'error') && (
+          <section className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4">
+            <h3 className="text-sm font-semibold mb-1 text-amber-200">Нужен Telegram</h3>
+            <p className="text-amber-300/90 text-xs">
+              {authError ?? 'Открой приложение из Telegram, чтобы продолжить.'}
+            </p>
+          </section>
+        )}
 
+        {/* ── Активная подписка / нет подписки ─────────────────────── */}
         <ActiveSubscriptionCard state={active} />
 
-        {/* QuickActions — компактные тайлы (иконка сверху, подпись снизу). */}
-        <section className="grid grid-cols-4 gap-2">
-          <QuickAction href="/plans" icon={<CreditCard className="w-5 h-5" />} label="Тарифы" />
-          <QuickAction href="/connect" icon={<Globe className="w-5 h-5" />} label="Подключить" />
-          <QuickAction href="/devices" icon={<Smartphone className="w-5 h-5" />} label="Устройства" />
-          {/* «История» доступна из bottom-nav, на главной её заменяем
-              на «Друзья» — реферальная программа с +3 дня за приглашение. */}
-          <QuickAction href="/referral" icon={<Users className="w-5 h-5" />} label="Друзья" badge="NEW" />
+        {/* ── Главные действия: Тарифы + Подключение ───────────────── */}
+        <section className="grid grid-cols-2 gap-3">
+          <BigActionCard
+            href="/plans"
+            icon={<CreditCard className="w-6 h-6" />}
+            title="Тарифы"
+            subtitle="Купить подписку"
+            tone="cyan"
+          />
+          <BigActionCard
+            href="/connect"
+            icon={<Globe className="w-6 h-6" />}
+            title="Подключение"
+            subtitle="Получить ключ"
+            tone="emerald"
+          />
+        </section>
+
+        {/* ── Реферальный баннер ─────────────────────────────────── */}
+        <ReferralBanner />
+
+        {/* ── Вспомогательные мелкие линки ─────────────────────── */}
+        <section className="grid grid-cols-2 gap-2">
+          <SmallLink href="/devices" icon={<Smartphone className="w-4 h-4" />} label="Устройства" />
+          <SmallLink href="/history" icon={<History className="w-4 h-4" />} label="История" />
         </section>
 
         <footer className="text-slate-500 text-[11px] pt-3 flex items-center gap-1.5">
@@ -145,16 +163,24 @@ function ActiveSubscriptionCard({ state }: { state: ActiveState }) {
 
   if (state.kind === 'none') {
     return (
-      <section className="rounded-2xl border border-slate-700/50 bg-slate-800/50 p-4">
-        <h3 className="text-sm font-semibold mb-1">Подписки пока нет</h3>
-        <p className="text-slate-400 text-xs mb-3 leading-relaxed">
-          Выбери тариф и оплати через Telegram Stars. Ключ появится сразу после оплаты.
-        </p>
+      <section className="rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-800/70 to-slate-900/50 p-5">
+        <div className="flex items-start gap-3 mb-3">
+          <div className="rounded-xl bg-cyan-400/10 p-2.5 shrink-0">
+            <Sparkles className="w-5 h-5 text-cyan-400" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold">Подписки пока нет</h3>
+            <p className="text-slate-400 text-xs mt-0.5 leading-relaxed">
+              Выбери тариф — получишь ключ сразу после оплаты.
+            </p>
+          </div>
+        </div>
         <Link
           href="/plans"
-          className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-400/50 hover:border-cyan-400 hover:bg-cyan-400/5 text-cyan-300 text-sm font-medium py-2.5 transition"
+          className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 active:bg-cyan-500 text-slate-900 text-sm font-semibold py-3 transition"
         >
           Выбрать тариф
+          <ArrowRight className="w-4 h-4" />
         </Link>
       </section>
     );
@@ -167,23 +193,32 @@ function ActiveSubscriptionCard({ state }: { state: ActiveState }) {
     0,
     Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)),
   );
+  // Прогресс-бар: считаем по 30/90/180/365 — чтобы было «осталось X% от срока».
+  // Без started_at точно не знаем, поэтому приближаем по типу плана.
+  // В идеале backend отдаёт started_at — пока без него, оставляем простой бар.
 
   return (
-    <section className="rounded-2xl border border-emerald-500/40 bg-slate-800/50 p-4">
-      <div className="flex justify-between items-start mb-3">
+    <section className="rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-emerald-500/10 to-slate-800/50 p-5">
+      <div className="flex justify-between items-start mb-3 gap-3">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold truncate">{sub.plan_name || 'Подписка'}</h3>
-          <p className="text-emerald-400 text-xs flex items-center gap-1.5 mt-0.5">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            Активна
-          </p>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-emerald-300 text-[11px] uppercase tracking-wider font-semibold">
+              Активна
+            </span>
+          </div>
+          <h3 className="text-base font-semibold truncate">
+            {sub.plan_name || 'Подписка'}
+          </h3>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-lg font-bold leading-none">{daysLeft}</p>
-          <p className="text-slate-400 text-[11px] mt-0.5">дней осталось</p>
+          <p className="text-3xl font-bold leading-none text-emerald-300">{daysLeft}</p>
+          <p className="text-slate-400 text-[10px] mt-1 uppercase tracking-wider">
+            дн. осталось
+          </p>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-3 pt-3 border-t border-emerald-500/20">
         <InfoRow label="Устройств" value={String(sub.max_devices)} />
         <InfoRow label="Истекает" value={expiresAt.toLocaleDateString('ru-RU')} />
       </div>
@@ -194,40 +229,101 @@ function ActiveSubscriptionCard({ state }: { state: ActiveState }) {
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-slate-400 text-[11px]">{label}</p>
-      <p className="text-slate-100 text-sm">{value}</p>
+      <p className="text-slate-400 text-[10px] uppercase tracking-wider">{label}</p>
+      <p className="text-slate-100 text-sm font-medium mt-0.5">{value}</p>
     </div>
   );
 }
 
-function QuickAction({
+// ─────────────────────────────────────────────────────────────
+// BigActionCard — большая карточка с иконкой, заголовком и подписью.
+// Используется для двух главных действий (Тарифы / Подключение).
+// ─────────────────────────────────────────────────────────────
+function BigActionCard({
+  href,
+  icon,
+  title,
+  subtitle,
+  tone,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  /** Цвет иконки/акцента. Бордер всегда нейтральный, чтобы карточки не «кричали». */
+  tone: 'cyan' | 'emerald';
+}) {
+  const toneClasses = tone === 'cyan'
+    ? 'bg-cyan-400/10 text-cyan-400 group-hover:bg-cyan-400/15'
+    : 'bg-emerald-400/10 text-emerald-400 group-hover:bg-emerald-400/15';
+
+  return (
+    <Link
+      href={href}
+      className="group rounded-2xl border border-slate-700/50 hover:border-slate-600 bg-slate-800/50 hover:bg-slate-800/70 p-4 flex flex-col gap-3 transition-all"
+    >
+      <span className={`inline-flex items-center justify-center w-12 h-12 rounded-xl transition-colors ${toneClasses}`}>
+        {icon}
+      </span>
+      <div>
+        <p className="text-sm font-semibold leading-tight">{title}</p>
+        <p className="text-slate-400 text-[11px] mt-0.5">{subtitle}</p>
+      </div>
+    </Link>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// ReferralBanner — акцентный баннер реферальной программы.
+// Привлекает внимание (полноширинный, с градиентом), но не агрессивен.
+// ─────────────────────────────────────────────────────────────
+function ReferralBanner() {
+  return (
+    <Link
+      href="/referral"
+      className="block rounded-2xl border border-violet-500/40 bg-gradient-to-r from-violet-500/15 via-fuchsia-500/10 to-violet-500/15 hover:from-violet-500/20 hover:to-violet-500/20 p-4 transition-all group"
+    >
+      <div className="flex items-center gap-3">
+        <div className="rounded-xl bg-violet-400/15 p-2.5 shrink-0">
+          <Users className="w-5 h-5 text-violet-300" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold">Пригласи друга</p>
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-violet-400 text-slate-900 leading-none">
+              NEW
+            </span>
+          </div>
+          <p className="text-violet-200/80 text-[11px] mt-0.5">
+            +3 дня обоим · 30% с оплат для партнёров
+          </p>
+        </div>
+        <ArrowRight className="w-4 h-4 text-violet-300 group-hover:translate-x-0.5 transition-transform shrink-0" />
+      </div>
+    </Link>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// SmallLink — мелкая ссылка для второстепенных разделов
+// (Устройства / История). Inline-стиль, чтобы не отвлекать.
+// ─────────────────────────────────────────────────────────────
+function SmallLink({
   href,
   icon,
   label,
-  badge,
 }: {
   href: string;
   icon: React.ReactNode;
   label: string;
-  /** Маленький бейдж в углу (напр. "NEW"). */
-  badge?: string;
 }) {
-  // Компактный тайл в стиле bot-menu / iOS app drawer: квадрат с иконкой
-  // сверху, подпись под ней. Подходит под grid-cols-4 на mini-app ширине.
   return (
     <Link
       href={href}
-      className="relative rounded-2xl border border-slate-700/50 hover:border-slate-600 bg-slate-800/50 px-2 py-3 flex flex-col items-center gap-1.5 transition"
+      className="flex items-center justify-center gap-2 rounded-xl border border-slate-800 hover:border-slate-700 bg-slate-900/40 hover:bg-slate-800/60 px-3 py-2.5 text-xs text-slate-300 hover:text-slate-100 transition"
     >
-      <span className="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-cyan-400/10 text-cyan-400">
-        {icon}
-      </span>
-      <span className="text-[11px] font-medium text-slate-200 truncate max-w-full">{label}</span>
-      {badge && (
-        <span className="absolute top-1.5 right-1.5 text-[9px] font-bold px-1 py-0.5 rounded bg-cyan-400 text-slate-900 leading-none">
-          {badge}
-        </span>
-      )}
+      {icon}
+      {label}
     </Link>
   );
 }

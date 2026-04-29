@@ -271,6 +271,22 @@ class VPNApiClient {
     return this.request<User>(`/auth/users/${userId}`);
   }
 
+  /** Self-service смена роли. Бэкенд разрешает только user ↔ partner
+   *  (admin запрещён). Возвращает обновлённого юзера И свежий JWT —
+   *  старый больше не валиден по содержимому role в payload, поэтому
+   *  клиент обязан заменить его в localStorage сразу после ответа. */
+  async selfUpdateRole(role: 'user' | 'partner'): Promise<{ user: User; jwt_token: string }> {
+    const result = await this.request<{ user: User; jwt_token: string }>('/auth/me/role', {
+      method: 'POST',
+      body: JSON.stringify({ role }),
+    });
+    // Сразу обновляем токен — иначе следующий запрос пойдёт со старой ролью.
+    if (result.jwt_token) {
+      this.setToken(result.jwt_token);
+    }
+    return result;
+  }
+
   // ─── Subscriptions ───────────────────────────────────────────────
 
   async listPlans(activeOnly: boolean = true): Promise<SubscriptionPlan[]> {

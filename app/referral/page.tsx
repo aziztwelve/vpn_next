@@ -12,10 +12,19 @@
 //   • сколько друзей пришло, сколько дней начислено
 //   • объяснение «приведи друга → +N дней обоим»
 //
-// Для партнёра (role='partner') дополнительно:
-//   • текущий баланс ₽
-//   • история заявок на вывод
-//   • форма создания новой заявки
+// Сверху страницы — segmented-toggle с двумя режимами, доступный ВСЕМ:
+//   • «Обычный» (role='user')   — реф-ссылка + статистика +3 дня
+//   • «Партнёр» (role='partner') — кабинет с балансом и withdrawal
+//
+// Self-service: переключение РЕАЛЬНО меняет user.role на бэке через
+// POST /api/v1/auth/me/role. Возвращается свежий JWT с новой ролью —
+// vpnApi автоматически заменяет старый. После этого:
+//   • реф-ссылка юзера сразу начинает работать по новой схеме
+//     (для partner: бонусы инвайтеру откладываются до оплаты, +30%)
+//   • UI обновляется (новый user в auth-context'е, isRealPartner следом)
+//
+// admin запрещён по proto-валидации. Если бэкенд недоступен или вернул
+// ошибку — показываем toast и откатываем UI обратно.
 //
 // MainButton Telegram'а сейчас не используем — у нас полноразмерные кнопки
 // внутри страницы, чтобы UX совпадал с остальными разделами Mini App.
@@ -31,8 +40,10 @@ import { useAuth } from '@/lib/auth-context';
 import { useTelegram } from '@/lib/useTelegram';
 import { formatPrice, pluralize } from '@/lib/format';
 
+type ViewMode = 'user' | 'partner';
+
 export default function ReferralPage() {
-  const { status: authStatus, user, error: authError } = useAuth();
+  const { status: authStatus, user, error: authError, setRole } = useAuth();
   const { webApp, hapticFeedback, showAlert } = useTelegram();
 
   const [link, setLink] = useState<ReferralLink | null>(null);
@@ -41,10 +52,22 @@ export default function ReferralPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [switching, setSwitching] = useState(false);
 
-  const isPartner = user?.role === 'partner';
+  // Текущая реальная роль из auth-context (обновится после setRole).
+  const isRealPartner = user?.role === 'partner';
+  // viewMode = реальная роль. Не локальное состояние — мы НЕ показываем
+  // превью, а реально меняем роль на бэке. Если переключение в процессе
+  // (switching=true) — кнопки disabled, чтобы не дабл-кликать.
+  const viewMode: ViewMode = isRealPartner ? 'partner' : 'user';
 
-  const loadAll = useCallback(async () => {
+  // reload — пользовательский ре-фетч (кнопка «Повторить», после смены роли,
+  // после создания withdrawal). Вызывается ТОЛЬКО из event-handler'ов,
+  // поэтому здесь МОЖНО синхронно дёргать setLoading(true)/setError(null) —
+  // правило react-hooks/set-state-in-effect не применяется. ВСЕ остальные
+  // setState'ы лежат после await, т.е. в микротаске, поэтому если
+  // fetch-логика когда-нибудь окажется в эффекте — вынести её отдельно.
+  const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -54,7 +77,7 @@ export default function ReferralPage() {
       const [linkResp, statsResp, withdrawalsResp] = await Promise.all([
         vpnApi.getReferralLink(),
         vpnApi.getReferralStats(),
-        isPartner ? vpnApi.listWithdrawals() : Promise.resolve(null),
+        isRealPartner ? vpnApi.listWithdrawals() : Promise.resolve(null),
       ]);
       setLink(linkResp);
       setStats(statsResp);
@@ -70,12 +93,47 @@ export default function ReferralPage() {
     } finally {
       setLoading(false);
     }
-  }, [isPartner]);
+  }, [isRealPartner]);
 
+  // Первичная загрузка. Логику fetch'а инлайним внутрь useEffect (а не
+  // зовём reload через useCallback) — иначе линтер react-hooks/
+  // set-state-in-effect трассирует setLoading(true)/setError(null) из
+  // reload и считает их синхронным setState в эффекте. Initial state
+  // loading=true уже даёт <Loader/> на первом рендере, а setLoading(false)
+  // ниже стоит ПОСЛЕ await — это в микротаске, не в теле эффекта.
+  // cancelled-флаг защищает от race condition'а (например, если эффект
+  // ре-ран'ится из-за смены isRealPartner до окончания предыдущего fetch'а).
   useEffect(() => {
     if (authStatus !== 'authenticated') return;
-    void loadAll();
-  }, [authStatus, loadAll]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [linkResp, statsResp, withdrawalsResp] = await Promise.all([
+          vpnApi.getReferralLink(),
+          vpnApi.getReferralStats(),
+          isRealPartner ? vpnApi.listWithdrawals() : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        setLink(linkResp);
+        setStats(statsResp);
+        if (withdrawalsResp) setWithdrawals(withdrawalsResp.requests);
+      } catch (err) {
+        if (cancelled) return;
+        const msg =
+          err instanceof ApiError
+            ? `${err.status}: ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : 'Ошибка загрузки';
+        setError(msg);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus, isRealPartner]);
 
   // Копирование ссылки в буфер обмена. На iOS внутри Telegram WebApp
   // navigator.clipboard может быть недоступен — fallback на execCommand.
@@ -115,6 +173,38 @@ export default function ReferralPage() {
     webApp.openTelegramLink(shareUrl);
   }, [link, webApp, hapticFeedback]);
 
+  // Handler смены режима: РЕАЛЬНО переключает роль на бэке через setRole().
+  // После успешного ответа auth-context обновляет user, и весь UI
+  // перерендерится с новой viewMode. После переключения перезагружаем
+  // stats/withdrawals — циферки могут измениться (для нового partner'а
+  // покажется текущий баланс ₽, новые карточки stats и т.д.).
+  //
+  // ВАЖНО: useCallback должен быть до любых early-return'ов, иначе
+  // нарушаются Rules of Hooks (на первом рендере при loading=true
+  // ниже идёт return и хук пропускается, на втором — вызывается).
+  const handleSwitchMode = useCallback(async (next: ViewMode) => {
+    if (next === viewMode || switching) return;
+    setSwitching(true);
+    hapticFeedback('light');
+    try {
+      await setRole(next);
+      // Перезагрузим данные с новой ролью (бэк использует свежий JWT)
+      await reload();
+      hapticFeedback('success');
+    } catch (err) {
+      const msg =
+        err instanceof ApiError
+          ? `${err.status}: ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : 'Не удалось сменить режим';
+      hapticFeedback('error');
+      showAlert(msg);
+    } finally {
+      setSwitching(false);
+    }
+  }, [viewMode, switching, setRole, reload, hapticFeedback, showAlert]);
+
   if (authStatus === 'loading' || loading) {
     return <Loader label="Загрузка..." />;
   }
@@ -131,7 +221,7 @@ export default function ReferralPage() {
     return (
       <ErrorScreen message={error}>
         <button
-          onClick={() => void loadAll()}
+          onClick={() => void reload()}
           className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-6 py-3"
         >
           Повторить
@@ -139,6 +229,8 @@ export default function ReferralPage() {
       </ErrorScreen>
     );
   }
+
+  const viewIsPartner = viewMode === 'partner';
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 pb-24">
@@ -150,9 +242,16 @@ export default function ReferralPage() {
           <h1 className="text-xl font-semibold">Пригласить друга</h1>
         </div>
 
+        {/* Toggle режимов — РЕАЛЬНО меняет user.role на бэке. */}
+        <ViewModeToggle
+          value={viewMode}
+          onChange={handleSwitchMode}
+          disabled={switching}
+        />
+
         <p className="text-slate-400 text-sm leading-relaxed">
-          Поделись ссылкой — друг получит {isPartner ? 'пробный период,' : '+3 дня к подписке,'}
-          {isPartner ? (
+          Поделись ссылкой — друг получит {viewIsPartner ? 'пробный период,' : '+3 дня к подписке,'}
+          {viewIsPartner ? (
             <>
               {' '}а тебе вернётся <span className="text-emerald-300">30%</span> с его первой оплаты на твой баланс ₽.
             </>
@@ -161,7 +260,8 @@ export default function ReferralPage() {
           )}
         </p>
 
-        {/* Реферальная ссылка + кнопки */}
+        {/* Реферальная ссылка + кнопки — показываем всегда (и в обычном,
+            и в партнёрском режиме одна и та же ссылка). */}
         {link && (
           <section className="rounded-2xl border border-slate-700/50 bg-slate-800/50 p-4 space-y-3">
             <div className="text-xs text-slate-400 uppercase tracking-wider">Твоя ссылка</div>
@@ -190,15 +290,19 @@ export default function ReferralPage() {
           </section>
         )}
 
-        {/* Статистика */}
-        {stats && <StatsBlock stats={stats} isPartner={isPartner} />}
+        {/* Статистика — в партнёрском view показываются доп. карточки
+            баланса/всего заработано (для реального партнёра — реальные
+            числа, для не-partner — нули, потому что бэк начислений нет). */}
+        {stats && <StatsBlock stats={stats} isPartner={viewIsPartner} />}
 
-        {/* Партнёрская секция: вывод средств */}
-        {isPartner && stats && (
+        {/* Партнёрский кабинет — доступен всем юзерам в partner-view.
+            Для не-partner'а баланс будет 0, а попытка withdrawal вернёт
+            бизнес-ошибку с бэка (показывается прямо в форме). */}
+        {viewIsPartner && stats && (
           <PartnerWithdrawalSection
             currentBalance={stats.current_balance_rub}
             withdrawals={withdrawals}
-            onCreated={() => void loadAll()}
+            onCreated={() => void reload()}
           />
         )}
       </div>
@@ -494,6 +598,59 @@ function withdrawalBadge(status: string): { label: string; className: string } {
     default:
       return { label: status, className: 'bg-slate-700 text-slate-300' };
   }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// ViewModeToggle — segmented-control «Обычный / Партнёр».
+// Стиль повторяет BigActionCard на главной (cyan-400 active state),
+// чтобы визуально вписаться в общий язык.
+// ──────────────────────────────────────────────────────────────────
+function ViewModeToggle({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: ViewMode;
+  onChange: (v: ViewMode) => void;
+  /** Залочить кнопки во время API-запроса смены роли. */
+  disabled?: boolean;
+}) {
+  const options: { value: ViewMode; label: string; sub: string }[] = [
+    { value: 'user', label: 'Обычный', sub: '+3 дня' },
+    { value: 'partner', label: 'Партнёр', sub: '30% ₽' },
+  ];
+
+  return (
+    <div className="rounded-2xl border border-slate-700/50 bg-slate-800/50 p-1 grid grid-cols-2 gap-1 relative">
+      {options.map((opt) => {
+        const isActive = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            disabled={disabled}
+            aria-pressed={isActive}
+            className={`rounded-xl px-3 py-2.5 text-sm font-medium transition-colors disabled:opacity-60 disabled:cursor-wait ${
+              isActive
+                ? 'bg-cyan-400/15 text-cyan-300'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <span className="block">{opt.label}</span>
+            <span className={`block text-[10px] mt-0.5 ${isActive ? 'text-cyan-400/80' : 'text-slate-500'}`}>
+              {opt.sub}
+            </span>
+          </button>
+        );
+      })}
+      {disabled && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <Loader2 className="w-4 h-4 animate-spin text-cyan-300" />
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ──────────────────────────────────────────────────────────────────

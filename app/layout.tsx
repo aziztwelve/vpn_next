@@ -38,7 +38,9 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <Providers>
-          <div className="pb-16">{children}</div>
+          {/* pb-[84px] = высота bottom-nav (h-[84px]), чтобы контент
+              не скрывался под навигацией. */}
+          <div className="pb-[84px]">{children}</div>
           <BottomNav />
         </Providers>
       </body>

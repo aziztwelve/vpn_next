@@ -33,6 +33,9 @@ interface AuthState {
   trialActivation: TrialActivation | null;
   /** Перевалидировать initData и выпустить новый JWT. Вручную нужно редко. */
   refresh: () => Promise<void>;
+  /** Self-service смена роли (user ↔ partner). Дёргает бэкенд, обновляет
+   *  user в state, перезаписывает JWT через vpnApi.selfUpdateRole. */
+  setRole: (role: 'user' | 'partner') => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -112,8 +115,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     ? { subscription: trialSub, dismiss: () => setTrialSub(null) }
     : null;
 
+  const setRole = useCallback(async (role: 'user' | 'partner') => {
+    const resp = await vpnApi.selfUpdateRole(role);
+    // vpnApi.selfUpdateRole уже обновил token внутри — нам остаётся
+    // только синхронизировать user в state.
+    setUser(resp.user);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ status, user, error, trialActivation, refresh: authenticate }}>
+    <AuthContext.Provider
+      value={{ status, user, error, trialActivation, refresh: authenticate, setRole }}
+    >
       {children}
     </AuthContext.Provider>
   );
