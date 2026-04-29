@@ -126,7 +126,16 @@ function Waiting({ elapsed }: { elapsed: number }) {
         Заверши оплату в открывшейся вкладке. Как только банк подтвердит платёж —
         эта страница сама перейдёт на главную. Подписка активируется автоматически.
       </p>
-      <div className="text-xs text-slate-500">прошло {seconds} сек</div>
+      <div className="text-xs text-slate-500 mb-5">прошло {seconds} сек</div>
+      {/* Запасной выход: если юзер передумал или закрыл окно оплаты —
+          даём уйти. Webhook независимо активирует подписку, поллинг тут не
+          обязателен для успеха. */}
+      <Link
+        href="/"
+        className="inline-block bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg px-5 py-2 text-sm font-medium transition"
+      >
+        Закрыть и вернуться на главную
+      </Link>
     </>
   );
 }

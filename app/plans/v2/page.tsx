@@ -56,19 +56,24 @@ function writeLS(key: string, value: string | null) {
   }
 }
 
-/** Начальное значение провайдера: восстанавливаем из LS, с fallback на wata,
- *  если Stars недоступен в этой среде (открыто в web вне Telegram). */
+/** Начальное значение провайдера. На текущий момент в UI включён только
+ *  Platega — остальные провайдеры закомментированы в ProviderSelector.tsx
+ *  и отключены через env-флаги *_ENABLED=false на бэке.
+ *
+ *  Когда захотим вернуть мульти-провайдерный селектор — раскомментировать
+ *  блок ниже (LS-восстановление + Stars-fallback) и убрать `return 'platega'`. */
 function resolveInitialProvider(): PaymentProvider {
-  const saved = readLS(LS_PROVIDER);
-  if (saved === 'wata' || saved === 'yoomoney') return saved;
-  if (typeof window !== 'undefined') {
-    const starsAvailable =
-      typeof (window as { Telegram?: { WebApp?: { openInvoice?: unknown } } }).Telegram?.WebApp
-        ?.openInvoice === 'function';
-    if (saved === 'telegram_stars' && starsAvailable) return 'telegram_stars';
-    return starsAvailable ? 'telegram_stars' : 'wata';
-  }
-  return 'telegram_stars';
+  return 'platega';
+  // const saved = readLS(LS_PROVIDER);
+  // if (saved === 'wata' || saved === 'yoomoney' || saved === 'platega') return saved;
+  // if (typeof window !== 'undefined') {
+  //   const starsAvailable =
+  //     typeof (window as { Telegram?: { WebApp?: { openInvoice?: unknown } } }).Telegram?.WebApp
+  //       ?.openInvoice === 'function';
+  //   if (saved === 'telegram_stars' && starsAvailable) return 'telegram_stars';
+  //   return starsAvailable ? 'telegram_stars' : 'platega';
+  // }
+  // return 'platega';
 }
 
 export default function PlansV2Page() {
@@ -119,8 +124,9 @@ export default function PlansV2Page() {
         sorted.forEach((p, i) => map.set(p.id, pricings[i]));
         setPricingByPlan(map);
 
-        // Выбор по умолчанию: средний план (самый «популярный»), иначе первый.
-        const defaultPlan = sorted[Math.floor(sorted.length / 2)] ?? sorted[0];
+        // Выбор по умолчанию: первый план (самый дешёвый — низкий порог входа).
+        const defaultPlan = sorted[0];
+        if (!defaultPlan) return;
         setSelectedPlanId(defaultPlan.id);
 
         // Устройства — пытаемся вспомнить из localStorage, иначе 1.
@@ -151,14 +157,13 @@ export default function PlansV2Page() {
     };
   }, []);
 
-  // Если Stars вдруг стали недоступны (юзер открыл страницу вне Telegram, а
-  // в LS было 'telegram_stars') — переключаем провайдера через async-style
-  // (setState в Promise callback, чтобы не нарушить react-hooks/set-state-in-effect).
-  useEffect(() => {
-    if (!canUseStars && selectedProvider === 'telegram_stars') {
-      Promise.resolve().then(() => setSelectedProvider('wata'));
-    }
-  }, [canUseStars, selectedProvider]);
+  // Stars-fallback больше не нужен — выбран всегда Platega.
+  // Восстановить когда Stars вернутся в селектор:
+  // useEffect(() => {
+  //   if (!canUseStars && selectedProvider === 'telegram_stars') {
+  //     Promise.resolve().then(() => setSelectedProvider('platega'));
+  //   }
+  // }, [canUseStars, selectedProvider]);
 
   // ── Производные значения ──────────────────────────────────────────
   const selectedPlan = useMemo(
@@ -243,10 +248,12 @@ export default function PlansV2Page() {
       );
       return;
     }
-    if (selectedProvider === 'telegram_stars' && !canUseStars) {
-      showAlert('Оплата Telegram Stars доступна только внутри Telegram.');
-      return;
-    }
+    // Stars-guard убран — Stars временно отключены.
+    // Восстановить при возврате Stars в UI:
+    // if (selectedProvider === 'telegram_stars' && !canUseStars) {
+    //   showAlert('Оплата Telegram Stars доступна только внутри Telegram.');
+    //   return;
+    // }
 
     try {
       setPay({ kind: 'creating' });
@@ -258,27 +265,31 @@ export default function PlansV2Page() {
       setPay({ kind: 'opening' });
       hapticFeedback('medium');
 
-      if (selectedProvider === 'telegram_stars') {
-        webApp!.openInvoice!(invoice.invoice_link, (invStatus) => {
-          if (invStatus === 'paid') {
-            hapticFeedback('success');
-            setPay({ kind: 'idle' });
-            router.push('/');
-          } else if (invStatus === 'failed') {
-            hapticFeedback('error');
-            setPay({ kind: 'error', message: 'Telegram вернул failed — попробуй ещё раз.' });
-          } else {
-            setPay({ kind: 'idle' });
-          }
-        });
-      } else {
-        // WATA / YooMoney — внешняя страница. Сразу уводим юзера на /payment/pending,
-        // который сам поллит статус и редиректит на / при paid.
-        if (webApp?.openLink) webApp.openLink(invoice.invoice_link);
-        else window.open(invoice.invoice_link, '_blank');
-        setPay({ kind: 'idle' });
-        router.push(`/payment/pending?payment_id=${invoice.payment_id}`);
-      }
+      // На текущий момент включён только Platega — это всегда внешняя страница
+      // (через webApp.openLink). Ветка Stars (webApp.openInvoice + callback)
+      // закомментирована; вернуть когда Stars снова появятся в селекторе.
+      //
+      // if (selectedProvider === 'telegram_stars') {
+      //   webApp!.openInvoice!(invoice.invoice_link, (invStatus) => {
+      //     if (invStatus === 'paid') {
+      //       hapticFeedback('success');
+      //       setPay({ kind: 'idle' });
+      //       router.push('/');
+      //     } else if (invStatus === 'failed') {
+      //       hapticFeedback('error');
+      //       setPay({ kind: 'error', message: 'Telegram вернул failed — попробуй ещё раз.' });
+      //     } else {
+      //       setPay({ kind: 'idle' });
+      //     }
+      //   });
+      // } else {
+      // Platega / WATA / YooMoney — внешняя страница оплаты. Сразу уводим юзера
+      // на /payment/pending, который сам поллит статус и редиректит на / при paid.
+      if (webApp?.openLink) webApp.openLink(invoice.invoice_link);
+      else window.open(invoice.invoice_link, '_blank');
+      setPay({ kind: 'idle' });
+      router.push(`/payment/pending?payment_id=${invoice.payment_id}`);
+      // }
     } catch (err) {
       hapticFeedback('error');
       const msg =
@@ -367,7 +378,10 @@ export default function PlansV2Page() {
             {/* TODO(plans-v2): Промокод — UI скрыт до появления бэкенд-ручки
                 POST /payments/promo/validate. См. docs/tasks/09-plans-v2.md */}
 
-            {/* Provider */}
+            {/* Provider — селектор временно скрыт (включён только Platega).
+                Когда вернём другие провайдеры в ProviderSelector.tsx —
+                раскомментить блок ниже. */}
+            {/*
             <div className="bg-slate-900 rounded-2xl p-5 border border-slate-800">
               <ProviderSelector
                 selected={selectedProvider}
@@ -378,13 +392,14 @@ export default function PlansV2Page() {
                 onSelect={handleProvider}
               />
             </div>
+            */}
 
             {/* TODO(plans-v2): Автопродление — UI скрыт до появления recurring-
                 flow через WATA + cron-воркера. См. docs/tasks/09-plans-v2.md */}
 
             {/* Total + Pay — компактный вариант (~75% от исходной высоты) */}
             {selectedPlan && selectedPrice && (
-              <div className="bg-slate-900 rounded-xl px-4 py-3 border border-slate-800 space-y-2.5 sticky bottom-2">
+              <div className="bg-slate-900 rounded-xl px-4 py-3 border border-slate-800 space-y-2.5 sticky bottom-20">
                 <div className="flex items-baseline justify-between">
                   <div className="text-xs text-slate-400">Итого к оплате</div>
                   <div className="text-right tabular-nums">

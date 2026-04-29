@@ -1,7 +1,7 @@
 'use client';
 
 import type { ComponentType } from 'react';
-import { CreditCard, Star, Wallet } from 'lucide-react';
+import { CreditCard } from 'lucide-react';
 import type { PaymentProvider } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -15,28 +15,43 @@ interface ProviderOption {
   accent: string;
 }
 
+// На текущий момент включён только Platega. Остальные провайдеры временно
+// отключены через env-флаги (PAYMENT_TELEGRAM_STARS_ENABLED,
+// PAYMENT_WATA_ENABLED) — записи ниже сохранены закомментированными,
+// чтобы вернуть провайдер = раскомментить запись + поставить флаг в .env.
+//
+// При расширении списка ProviderSelector автоматически снова покажется
+// в app/plans/v2/page.tsx (там сейчас весь блок селектора скрыт, но легко
+// раскомментировать).
 const PROVIDERS: ProviderOption[] = [
   {
-    id: 'telegram_stars',
-    label: 'Telegram Stars',
-    sublabel: 'Быстрая оплата в 1 клик',
-    icon: Star,
-    accent: 'text-amber-400',
-  },
-  {
-    id: 'wata',
-    label: 'Карта / СБП',
-    sublabel: 'Через WATA • рекомендуем',
+    id: 'platega',
+    label: 'Карта / СБП / ЕРИП',
+    sublabel: 'Через Platega',
     icon: CreditCard,
     accent: 'text-emerald-400',
   },
-  {
-    id: 'yoomoney',
-    label: 'YooMoney',
-    sublabel: 'Карта, кошелёк',
-    icon: Wallet,
-    accent: 'text-violet-400',
-  },
+  // {
+  //   id: 'telegram_stars',
+  //   label: 'Telegram Stars',
+  //   sublabel: 'Быстрая оплата в 1 клик',
+  //   icon: Star,
+  //   accent: 'text-amber-400',
+  // },
+  // {
+  //   id: 'wata',
+  //   label: 'Карта / СБП',
+  //   sublabel: 'Через WATA',
+  //   icon: CreditCard,
+  //   accent: 'text-emerald-400',
+  // },
+  // {
+  //   id: 'yoomoney',
+  //   label: 'YooMoney',
+  //   sublabel: 'Карта, кошелёк',
+  //   icon: Wallet,
+  //   accent: 'text-violet-400',
+  // },
 ];
 
 interface ProviderSelectorProps {

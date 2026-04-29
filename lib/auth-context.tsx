@@ -9,6 +9,12 @@ import React, {
 } from 'react';
 import { useTelegram } from './useTelegram';
 import { vpnApi, type User, type ValidateTelegramResponse } from './api';
+import {
+  parseRefToken,
+  persistRefToken,
+  getStoredRefToken,
+  clearStoredRefToken,
+} from './referral';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 
@@ -56,9 +62,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // Реферальный токен: первый запуск — берём из start_param,
+    // последующие — из localStorage (Telegram очищает start_param при reload).
+    // Если токен пришёл свежий — сохраняем под именем vpn_ref_token, чтобы
+    // не потерять атрибуцию между перезапусками Mini App до первой
+    // успешной валидации.
+    const startParamToken = parseRefToken(webApp.initDataUnsafe?.start_param);
+    if (startParamToken) {
+      persistRefToken(startParamToken);
+    }
+    const refToken = startParamToken ?? getStoredRefToken();
+
     try {
       setStatus('loading');
-      const resp = await vpnApi.validateTelegramUser(initData);
+      const resp = await vpnApi.validateTelegramUser(initData, refToken);
       setUser(resp.user);
       setError(null);
       setStatus('authenticated');
@@ -66,6 +83,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setTrialSub(resp.subscription);
       } else {
         setTrialSub(null);
+      }
+      // После первой успешной валидации с реферальным токеном
+      // удаляем его — повторные вызовы validate не будут регистрировать
+      // реферал (бэкенд игнорирует ref_token для существующих юзеров,
+      // но и хранить его дальше смысла нет).
+      if (refToken) {
+        clearStoredRefToken();
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Не удалось авторизоваться';

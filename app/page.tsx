@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CreditCard, Globe, History, Shield, Smartphone } from 'lucide-react';
+import { CreditCard, Globe, Shield, Smartphone, Users } from 'lucide-react';
 import { ApiError, vpnApi, type Subscription } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { TrialBanner } from '@/components/trial-banner';
@@ -106,7 +106,9 @@ export default function HomePage() {
           <QuickAction href="/plans" icon={<CreditCard className="w-5 h-5" />} label="Тарифы" />
           <QuickAction href="/connect" icon={<Globe className="w-5 h-5" />} label="Подключить" />
           <QuickAction href="/devices" icon={<Smartphone className="w-5 h-5" />} label="Устройства" />
-          <QuickAction href="/history" icon={<History className="w-5 h-5" />} label="История" />
+          {/* «История» доступна из bottom-nav, на главной её заменяем
+              на «Друзья» — реферальная программа с +3 дня за приглашение. */}
+          <QuickAction href="/referral" icon={<Users className="w-5 h-5" />} label="Друзья" badge="NEW" />
         </section>
 
         <footer className="text-slate-500 text-[11px] pt-3 flex items-center gap-1.5">

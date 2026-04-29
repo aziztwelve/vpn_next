@@ -3,6 +3,13 @@
 // в CORS и держать запросы same-origin с Mini App.
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api/proxy';
 
+import type {
+  ReferralLink,
+  ReferralStats,
+  WithdrawalRequest,
+  WithdrawalListResponse,
+} from './referral';
+
 // ───── Типы ─────────────────────────────────────────────────────────
 
 export interface User {
@@ -58,6 +65,9 @@ export interface ValidateTelegramResponse {
     expires_at: string;
     status: SubscriptionStatus;
   };
+  /** true, если для нового юзера была успешно зарегистрирована
+   *  реферальная связь (auth-service дёрнул referral-service). */
+  referral_registered?: boolean;
 }
 
 export interface Subscription {
@@ -117,8 +127,13 @@ export interface ActiveConnectionsResponse {
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded' | string;
 
 /** Все поддерживаемые платёжные провайдеры. Держим union, чтобы TS ловил опечатки
- *  (selectedProvider === 'wata' вместо 'WATA'). Бэкенд принимает эти же строки. */
-export type PaymentProvider = 'telegram_stars' | 'wata' | 'yoomoney';
+ *  (selectedProvider === 'wata' вместо 'WATA'). Бэкенд принимает эти же строки.
+ *
+ *  На текущий момент в UI включён только 'platega' — остальные временно
+ *  отключены (env-флаги *_ENABLED=false на бэке + закомментированы записи
+ *  в components/plans/ProviderSelector.tsx). Тип оставляем расширенным,
+ *  чтобы вернуть провайдер обратно = раскомментить запись и поставить флаг. */
+export type PaymentProvider = 'telegram_stars' | 'wata' | 'yoomoney' | 'platega';
 
 export interface Payment {
   id: number;
@@ -235,10 +250,18 @@ class VPNApiClient {
 
   // ─── Auth ─────────────────────────────────────────────────────────
 
-  async validateTelegramUser(initData: string): Promise<ValidateTelegramResponse> {
+  async validateTelegramUser(
+    initData: string,
+    refToken?: string | null,
+  ): Promise<ValidateTelegramResponse> {
+    // ref_token отправляем только если непустой — не флудим бэкенд лишним
+    // полем. Бэкенд игнорирует ref_token для уже существующих юзеров.
+    const body: Record<string, string> = { init_data: initData };
+    if (refToken) body.ref_token = refToken;
+
     const result = await this.request<ValidateTelegramResponse>('/auth/validate', {
       method: 'POST',
-      body: JSON.stringify({ init_data: initData }),
+      body: JSON.stringify(body),
     });
     this.setToken(result.jwt_token);
     return result;
@@ -316,12 +339,12 @@ class VPNApiClient {
   async createInvoice(
     planId: number,
     maxDevices: number,
-    providerOrOptions: PaymentProvider | CreateInvoiceOptions = 'telegram_stars',
+    providerOrOptions: PaymentProvider | CreateInvoiceOptions = 'platega',
   ): Promise<CreateInvoiceResponse> {
     const provider =
       typeof providerOrOptions === 'string'
         ? providerOrOptions
-        : providerOrOptions.provider ?? 'telegram_stars';
+        : providerOrOptions.provider ?? 'platega';
 
     const params = new URLSearchParams({ provider });
     return this.request<CreateInvoiceResponse>(`/payments?${params}`, {
@@ -336,10 +359,66 @@ class VPNApiClient {
   }
 
   /** Статус одного платежа — для /payment/pending (poll'им до paid/failed).
-   *  TODO(plans-v2, backend): сделать отдельный `GET /payments/:id`; пока фильтруем listPayments. */
+   *  Бэкенд: `GET /payments/:id` (gateway проверяет user_id из JWT — возвращает
+   *  404 если платёж чужой). При 404 возвращаем null, чтобы вызывающий код
+   *  мог отличить «нет такого» от сетевой ошибки. */
   async getPaymentStatus(paymentId: number): Promise<Payment | null> {
-    const { payments } = await this.listPayments(100, 0);
-    return payments.find((p) => p.id === paymentId) ?? null;
+    try {
+      return await this.request<Payment>(`/payments/${paymentId}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  // ─── Referral program ────────────────────────────────────────────
+
+  /** Получить (создать при первом вызове) реферальную ссылку текущего юзера.
+   *  Идемпотентно: один токен на юзера, повторные вызовы возвращают существующий. */
+  async getReferralLink(): Promise<ReferralLink> {
+    return this.request<ReferralLink>('/referral/link');
+  }
+
+  /** Статистика рефералов текущего юзера: сколько приглашено, сколько купили,
+   *  накопленный балaнс (для partner-роли) и т.д. */
+  async getReferralStats(): Promise<ReferralStats> {
+    return this.request<ReferralStats>('/referral/stats');
+  }
+
+  /** Создать заявку на вывод партнёрского баланса. Доступно только для
+   *  юзеров с role='partner'. Бэкенд может ответить 400 с error-кодом:
+   *    insufficient_balance | not_partner | amount_too_small | invalid_method.
+   */
+  async createWithdrawalRequest(
+    amountRub: string,
+    paymentMethod: string,
+    paymentDetails: Record<string, string>,
+  ): Promise<{ request: WithdrawalRequest } | { error: string }> {
+    return this.request<{ request: WithdrawalRequest } | { error: string }>(
+      '/referral/withdrawal',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          amount_rub: amountRub,
+          payment_method: paymentMethod,
+          payment_details: paymentDetails,
+        }),
+      },
+    );
+  }
+
+  /** Список заявок на вывод текущего юзера. */
+  async listWithdrawals(
+    status?: string,
+    limit = 50,
+    offset = 0,
+  ): Promise<WithdrawalListResponse> {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    if (status) params.set('status', status);
+    return this.request<WithdrawalListResponse>(`/referral/withdrawals?${params}`);
   }
 }
 
