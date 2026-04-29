@@ -82,7 +82,7 @@ export default function HomePage() {
           </h1>
           <p className="text-slate-400 text-xs mt-0.5">
             {status === 'authenticated'
-              ? 'Быстро, без логов, по Telegram Stars'
+              ? 'Быстро, безопасно, без логов — от айтишников'
               : 'Telegram Mini App для приватного интернета'}
           </p>
         </header>

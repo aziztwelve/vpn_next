@@ -32,7 +32,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Copy, Share2, Users, Gift, Wallet, Loader2 } from 'lucide-react';
+import { ArrowLeft, Copy, Share2, Users, Gift, Wallet, Loader2, AlertTriangle } from 'lucide-react';
 
 import { ApiError, vpnApi } from '@/lib/api';
 import type { ReferralLink, ReferralStats, WithdrawalRequest } from '@/lib/referral';
@@ -248,6 +248,21 @@ export default function ReferralPage() {
           onChange={handleSwitchMode}
           disabled={switching}
         />
+
+        {/* Предупреждение для партнёра: переключение в «+3 дня» блокирует
+            вывод и начисление новых комиссий. Деньги физически остаются
+            в users.balance, но в UI этого не видно — отсюда warning. */}
+        {viewIsPartner && (
+          <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-amber-300 text-xs leading-relaxed">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <p>
+              <span className="font-semibold">Чтобы выводить деньги — оставайся в этом режиме.</span>{' '}
+              <span className="text-amber-300/80">
+                На «+3 дня» баланс не пропадёт, но вывод и новые комиссии заблокируются.
+              </span>
+            </p>
+          </div>
+        )}
 
         <p className="text-slate-400 text-sm leading-relaxed">
           Поделись ссылкой — друг получит {viewIsPartner ? 'пробный период,' : '+3 дня к подписке,'}

@@ -2,10 +2,17 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, RefreshCw, Smartphone, Trash2 } from 'lucide-react';
+import { ArrowRight, Loader2, RefreshCw, Smartphone, Trash2 } from 'lucide-react';
 import { ApiError, vpnApi, type ActiveConnection } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useTelegram } from '@/lib/useTelegram';
+
+// Дизайн страницы синхронен с главной (app/page.tsx):
+//   page    — bg-slate-950
+//   card    — bg-slate-800/50 + border-slate-700/50
+//   радиус  — rounded-2xl
+//   max-w   — max-w-2xl, px-4 pt-5 space-y-4, pb-24 для bottom-nav
+//   акценты — cyan-400 (primary), red-300 для disconnect.
 
 type LoadState =
   | { kind: 'loading' }
@@ -19,7 +26,10 @@ export default function DevicesPage() {
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [pendingId, setPendingId] = useState<number | null>(null);
 
-  const load = useCallback(async () => {
+  // reload — пользовательский ре-фетч (кнопка "обновить" / после disconnect).
+  // Здесь МОЖНО дёргать setState upfront — вызывается из event handler'а,
+  // правило react-hooks/set-state-in-effect не применяется.
+  const reload = useCallback(async () => {
     setState({ kind: 'loading' });
     try {
       const data = await vpnApi.getActiveConnections();
@@ -40,10 +50,39 @@ export default function DevicesPage() {
     }
   }, []);
 
+  // Первичная загрузка. Логика инлайнится внутрь useEffect (а не зовётся
+  // через reload), чтобы линтер react-hooks/set-state-in-effect не считал
+  // setState({kind:'loading'}) синхронным setState в эффекте. Initial state
+  // уже kind:'loading', все остальные setState'ы — после await.
+  // cancelled-флаг защищает от race при unmount/ре-ран.
   useEffect(() => {
     if (status !== 'authenticated') return;
-    void load();
-  }, [status, load]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await vpnApi.getActiveConnections();
+        if (cancelled) return;
+        setState({
+          kind: 'ok',
+          connections: data.connections ?? [],
+          total: data.total_connections ?? 0,
+          max: data.max_devices ?? 0,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        const msg =
+          err instanceof ApiError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'Не удалось загрузить устройства';
+        setState({ kind: 'error', message: msg });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
 
   const disconnect = async (conn: ActiveConnection) => {
     // Если есть TG confirm — используем его, иначе нативный confirm.
@@ -64,7 +103,7 @@ export default function DevicesPage() {
     try {
       await vpnApi.disconnectDevice(conn.id);
       hapticFeedback('success');
-      await load();
+      await reload();
     } catch (err) {
       hapticFeedback('error');
       const msg =
@@ -79,105 +118,71 @@ export default function DevicesPage() {
     }
   };
 
-  if (status === 'loading') return <Loader label="Авторизация..." />;
+  if (status === 'loading') return <FullPageLoader label="Авторизация..." />;
   if (status !== 'authenticated') {
     return (
-      <ErrorScreen message={authError ?? 'Нужна авторизация через Telegram.'}>
-        <Link href="/" className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-6 py-3 inline-block">
-          На главную
-        </Link>
-      </ErrorScreen>
+      <FullPageError message={authError ?? 'Нужна авторизация через Telegram.'} />
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 p-6">
-      <div className="max-w-2xl mx-auto space-y-6">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center">
-            <Link href="/" className="mr-4" aria-label="Назад">
-              <ArrowLeft className="w-6 h-6" />
-            </Link>
-            <h1 className="text-2xl font-bold">Устройства</h1>
+    <div className="min-h-screen bg-slate-950 text-slate-50 pb-24">
+      <div className="max-w-2xl mx-auto px-4 pt-5 space-y-4">
+        <header className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold">Устройства</h1>
+            <p className="text-slate-400 text-xs mt-0.5">Активные подключения</p>
           </div>
           <button
             type="button"
-            onClick={() => void load()}
-            className="inline-flex items-center gap-1 text-slate-400 hover:text-slate-100 text-sm"
+            onClick={() => void reload()}
+            disabled={state.kind === 'loading'}
+            className="shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-slate-700/50 hover:border-slate-600 bg-slate-800/50 hover:bg-slate-800/70 text-slate-300 hover:text-slate-100 disabled:opacity-60 px-3 py-2 text-xs transition"
+            aria-label="Обновить"
           >
-            <RefreshCw className="w-4 h-4" /> обновить
+            <RefreshCw className={`w-3.5 h-3.5 ${state.kind === 'loading' ? 'animate-spin' : ''}`} />
+            Обновить
           </button>
-        </div>
+        </header>
 
-        {state.kind === 'loading' && <Loader label="Загружаем устройства..." inline />}
+        {state.kind === 'loading' && (
+          <section className="rounded-2xl border border-slate-700/50 bg-slate-800/50 p-4 animate-pulse">
+            <div className="h-4 w-24 bg-slate-700/60 rounded mb-2" />
+            <div className="h-3 w-40 bg-slate-700/60 rounded" />
+          </section>
+        )}
 
         {state.kind === 'error' && (
-          <div className="bg-red-500/10 border border-red-500/40 text-red-300 rounded-lg p-4">
-            <p className="text-sm mb-3">{state.message}</p>
+          <section className="rounded-2xl border border-red-500/40 bg-slate-800/50 p-4">
+            <h3 className="text-sm font-semibold mb-1">Ошибка</h3>
+            <p className="text-red-400 text-xs mb-3">{state.message}</p>
             <button
               type="button"
-              onClick={() => void load()}
-              className="bg-slate-800 hover:bg-slate-700 rounded-lg px-4 py-2 text-sm"
+              onClick={() => void reload()}
+              className="rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs font-medium px-4 py-2 transition"
             >
               Повторить
             </button>
-          </div>
+          </section>
         )}
 
         {state.kind === 'ok' && (
           <>
-            <div className="bg-slate-900 rounded-lg p-4 flex justify-between items-center">
-              <p className="text-slate-400 text-sm">Активных устройств</p>
-              <p className="text-lg font-semibold">
-                {state.total} / {state.max}
-              </p>
-            </div>
+            <SlotsCounter total={state.total} max={state.max} />
 
             {state.connections.length === 0 ? (
-              <div className="text-center py-10 text-slate-400">
-                Ни одного активного устройства.
-                <div className="mt-4">
-                  <Link
-                    href="/connect"
-                    className="inline-block bg-blue-600 hover:bg-blue-700 rounded-lg px-6 py-3 font-semibold transition"
-                  >
-                    Подключить устройство
-                  </Link>
-                </div>
-              </div>
+              <EmptyDevicesCard />
             ) : (
-              <div className="space-y-2">
+              <section className="space-y-3">
                 {state.connections.map((c) => (
-                  <div
+                  <DeviceRow
                     key={c.id}
-                    className="bg-slate-900 rounded-lg p-4 flex items-center justify-between gap-3 border border-slate-800"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <Smartphone className="w-5 h-5 text-blue-400 shrink-0" />
-                      <div className="min-w-0">
-                        <p className="font-medium truncate">{c.device_identifier}</p>
-                        <p className="text-slate-400 text-xs truncate">
-                          {c.server_name} · подключено{' '}
-                          {new Date(c.connected_at).toLocaleDateString('ru-RU')}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void disconnect(c)}
-                      disabled={pendingId === c.id}
-                      className="shrink-0 inline-flex items-center gap-1 bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50 text-red-300 rounded-lg px-3 py-2 text-sm transition"
-                    >
-                      {pendingId === c.id ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="w-4 h-4" />
-                      )}
-                      Отключить
-                    </button>
-                  </div>
+                    conn={c}
+                    pending={pendingId === c.id}
+                    onDisconnect={() => void disconnect(c)}
+                  />
                 ))}
-              </div>
+              </section>
             )}
           </>
         )}
@@ -186,30 +191,129 @@ export default function DevicesPage() {
   );
 }
 
-function Loader({ label, inline = false }: { label: string; inline?: boolean }) {
-  if (inline) {
-    return (
-      <div className="flex items-center gap-2 text-slate-400">
-        <Loader2 className="w-4 h-4 animate-spin" /> {label}
+// ─────────────────────────────────────────────────────────────
+// SlotsCounter — компактный индикатор «X из Y слотов занято»,
+// в цвет emerald (если есть свободные) или amber (если все заняты).
+// ─────────────────────────────────────────────────────────────
+function SlotsCounter({ total, max }: { total: number; max: number }) {
+  const allBusy = max > 0 && total >= max;
+  const accent = allBusy
+    ? 'border-amber-500/40 from-amber-500/10 text-amber-200'
+    : 'border-emerald-500/40 from-emerald-500/10 text-emerald-200';
+  return (
+    <section
+      className={`rounded-2xl border bg-gradient-to-br to-slate-800/50 p-4 flex items-center justify-between ${accent}`}
+    >
+      <div>
+        <p className="text-[10px] uppercase tracking-wider opacity-80">Активных устройств</p>
+        <p className="text-2xl font-bold leading-none mt-1">
+          {total} <span className="text-slate-400 text-base font-normal">/ {max || '—'}</span>
+        </p>
       </div>
-    );
-  }
+      <Smartphone className={`w-6 h-6 ${allBusy ? 'text-amber-300' : 'text-emerald-300'}`} />
+    </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// EmptyDevicesCard — gradient карточка по образцу «Подписки пока нет»
+// с главной. CTA ведёт на /connect.
+// ─────────────────────────────────────────────────────────────
+function EmptyDevicesCard() {
+  return (
+    <section className="rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-800/70 to-slate-900/50 p-5">
+      <div className="flex items-start gap-3 mb-3">
+        <div className="rounded-xl bg-cyan-400/10 p-2.5 shrink-0">
+          <Smartphone className="w-5 h-5 text-cyan-400" />
+        </div>
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold">Пока нет устройств</h3>
+          <p className="text-slate-400 text-xs mt-0.5 leading-relaxed">
+            Подключи приложение через ссылку — устройство появится тут после
+            первого fetch&apos;а подписки.
+          </p>
+        </div>
+      </div>
+      <Link
+        href="/connect"
+        className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 active:bg-cyan-500 text-slate-900 text-sm font-semibold py-3 transition"
+      >
+        Подключить устройство
+        <ArrowRight className="w-4 h-4" />
+      </Link>
+    </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// DeviceRow — карточка одного устройства. Совместима с двумя моделями:
+//   - server_name пустой: запись из subscription-touch'а (server_id=NULL).
+//     Показываем «через подписку» как replacement.
+//   - server_name есть: legacy GetVLESSLink-flow, показываем имя сервера.
+// Кнопка «Отключить» — красная, в стиле остального UI.
+// ─────────────────────────────────────────────────────────────
+function DeviceRow({
+  conn,
+  pending,
+  onDisconnect,
+}: {
+  conn: ActiveConnection;
+  pending: boolean;
+  onDisconnect: () => void;
+}) {
+  const connectedAt = new Date(conn.connected_at).toLocaleDateString('ru-RU');
+  // server_name пусто для subscription-touch — ставим заглушку.
+  const sourceLabel = conn.server_name || 'через подписку';
+
+  return (
+    <div className="rounded-2xl border border-slate-700/50 bg-slate-800/50 p-4 flex items-center gap-3">
+      <span className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-cyan-400/10 text-cyan-400 shrink-0">
+        <Smartphone className="w-5 h-5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold truncate">{conn.device_identifier}</p>
+        <p className="text-slate-400 text-[11px] truncate mt-0.5">
+          {sourceLabel} · подключено {connectedAt}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onDisconnect}
+        disabled={pending}
+        className="shrink-0 inline-flex items-center gap-1 rounded-xl bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50 text-red-300 px-3 py-2 text-xs font-medium transition"
+      >
+        {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+        Отключить
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Полноэкранные fallback-screen'ы для unauth/loading состояний.
+// ─────────────────────────────────────────────────────────────
+function FullPageLoader({ label }: { label: string }) {
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center">
       <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4" />
-        <p className="text-slate-400">{label}</p>
+        <Loader2 className="animate-spin h-10 w-10 text-cyan-400 mx-auto mb-3" />
+        <p className="text-slate-400 text-sm">{label}</p>
       </div>
     </div>
   );
 }
 
-function ErrorScreen({ message, children }: { message: string; children?: React.ReactNode }) {
+function FullPageError({ message }: { message: string }) {
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
-      <div className="text-center">
-        <p className="text-red-400 mb-4">{message}</p>
-        {children}
+      <div className="text-center max-w-sm">
+        <p className="text-red-400 mb-4 text-sm">{message}</p>
+        <Link
+          href="/"
+          className="inline-flex items-center justify-center rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-900 text-sm font-semibold px-6 py-3 transition"
+        >
+          На главную
+        </Link>
       </div>
     </div>
   );

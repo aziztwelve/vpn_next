@@ -1,7 +1,14 @@
 'use client'
 
 import { useState } from 'react'
-import { X, FileText, Shield, Mail, MessageCircle } from 'lucide-react'
+import { ArrowRight, FileText, Mail, MessageCircle, Shield, X } from 'lucide-react'
+
+// Дизайн страницы синхронен с главной (app/page.tsx):
+//   page    — bg-slate-950
+//   card    — bg-slate-800/50 + border-slate-700/50
+//   радиус  — rounded-2xl
+//   max-w   — max-w-2xl, px-4 pt-5 space-y-4, pb-24 для bottom-nav
+//   акцент-tones для иконок: cyan / violet / emerald (как BigActionCard / Referral).
 
 type ModalType = 'privacy' | 'terms' | 'support' | null
 
@@ -12,59 +19,41 @@ export default function InfoPage() {
   const closeModal = () => setActiveModal(null)
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-6">
-      <div className="max-w-2xl mx-auto">
-        <h1 className="text-3xl font-bold mb-8">Информация</h1>
+    <div className="min-h-screen bg-slate-950 text-slate-50 pb-24">
+      <div className="max-w-2xl mx-auto px-4 pt-5 space-y-4">
+        <header>
+          <h1 className="text-xl font-semibold">Информация</h1>
+          <p className="text-slate-400 text-xs mt-0.5">Условия и поддержка</p>
+        </header>
 
-        <div className="space-y-4">
-          {/* Политика конфиденциальности */}
-          <button
+        <section className="space-y-3">
+          <InfoCard
             onClick={() => openModal('privacy')}
-            className="w-full bg-slate-900 hover:bg-slate-800 rounded-xl p-6 flex items-center gap-4 transition-colors"
-          >
-            <div className="bg-blue-500/10 p-3 rounded-lg">
-              <Shield className="w-6 h-6 text-blue-400" />
-            </div>
-            <div className="flex-1 text-left">
-              <h3 className="font-semibold text-lg">Политика конфиденциальности</h3>
-              <p className="text-slate-400 text-sm">Как мы обрабатываем ваши данные</p>
-            </div>
-          </button>
-
-          {/* Пользовательское соглашение */}
-          <button
+            icon={<Shield className="w-5 h-5" />}
+            tone="cyan"
+            title="Политика конфиденциальности"
+            subtitle="Как мы обрабатываем твои данные"
+          />
+          <InfoCard
             onClick={() => openModal('terms')}
-            className="w-full bg-slate-900 hover:bg-slate-800 rounded-xl p-6 flex items-center gap-4 transition-colors"
-          >
-            <div className="bg-purple-500/10 p-3 rounded-lg">
-              <FileText className="w-6 h-6 text-purple-400" />
-            </div>
-            <div className="flex-1 text-left">
-              <h3 className="font-semibold text-lg">Пользовательское соглашение</h3>
-              <p className="text-slate-400 text-sm">Условия использования сервиса</p>
-            </div>
-          </button>
-
-          {/* Поддержка */}
-          <button
+            icon={<FileText className="w-5 h-5" />}
+            tone="violet"
+            title="Пользовательское соглашение"
+            subtitle="Условия использования сервиса"
+          />
+          <InfoCard
             onClick={() => openModal('support')}
-            className="w-full bg-slate-900 hover:bg-slate-800 rounded-xl p-6 flex items-center gap-4 transition-colors"
-          >
-            <div className="bg-green-500/10 p-3 rounded-lg">
-              <MessageCircle className="w-6 h-6 text-green-400" />
-            </div>
-            <div className="flex-1 text-left">
-              <h3 className="font-semibold text-lg">Поддержка</h3>
-              <p className="text-slate-400 text-sm">Свяжитесь с нами</p>
-            </div>
-          </button>
-        </div>
+            icon={<MessageCircle className="w-5 h-5" />}
+            tone="emerald"
+            title="Поддержка"
+            subtitle="Свяжись с нами в Telegram"
+          />
+        </section>
 
-        {/* Версия приложения */}
-        <div className="mt-12 text-center text-slate-500 text-sm">
+        <footer className="pt-4 text-center text-slate-500 text-[11px]">
           <p>MaydaVPN v1.0.0</p>
-          <p className="mt-1">© 2026 Все права защищены</p>
-        </div>
+          <p className="mt-0.5">© 2026 Все права защищены</p>
+        </footer>
       </div>
 
       {/* Модальные окна */}
@@ -76,6 +65,48 @@ export default function InfoPage() {
         </Modal>
       )}
     </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// InfoCard — кнопка-карточка в стиле ReferralBanner с главной:
+// иконка в подкрашенном круге + заголовок + подзаголовок + стрелка.
+// ─────────────────────────────────────────────────────────────
+function InfoCard({
+  onClick,
+  icon,
+  title,
+  subtitle,
+  tone,
+}: {
+  onClick: () => void
+  icon: React.ReactNode
+  title: string
+  subtitle: string
+  tone: 'cyan' | 'violet' | 'emerald'
+}) {
+  const toneClasses =
+    tone === 'cyan'
+      ? 'bg-cyan-400/10 text-cyan-400'
+      : tone === 'violet'
+        ? 'bg-violet-400/10 text-violet-300'
+        : 'bg-emerald-400/10 text-emerald-400'
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group w-full rounded-2xl border border-slate-700/50 hover:border-slate-600 bg-slate-800/50 hover:bg-slate-800/70 p-4 flex items-center gap-3 transition-all text-left"
+    >
+      <span className={`inline-flex items-center justify-center w-10 h-10 rounded-xl shrink-0 ${toneClasses}`}>
+        {icon}
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold leading-tight">{title}</p>
+        <p className="text-slate-400 text-[11px] mt-0.5 truncate">{subtitle}</p>
+      </div>
+      <ArrowRight className="w-4 h-4 text-slate-500 group-hover:translate-x-0.5 group-hover:text-slate-300 transition-all shrink-0" />
+    </button>
   )
 }
 
