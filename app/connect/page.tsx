@@ -193,7 +193,7 @@ const CLIENTS: ClientDef[] = [
       android: [
         {
           label: 'Открыть в Google Play',
-          url: 'https://play.google.com/store/apps/details?id=org.incy.app',
+          url: 'https://play.google.com/store/apps/details?id=llc.itdev.incy',
         },
       ],
     },
