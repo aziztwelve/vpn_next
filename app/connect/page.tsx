@@ -342,12 +342,21 @@ export default function Connect2Page() {
   // Сортировка: рекомендуемые для платформы — первыми, остальные сохраняют
   // порядок из `CLIENTS`. Stable-sort через `Array.prototype.sort` (V8/JSC
   // гарантируют стабильность с ES2019).
+  //
+  // Android-override: INCY идёт раньше Happ (продуктовое решение — дефолт
+  // для Android, т.к. Happ рекомендуем на iOS/macOS, а на Android нам
+  // удобнее вести юзеров на INCY).
   const visibleClients = useMemo(() => {
-    return CLIENTS.filter((c) => (c.stores[platform]?.length ?? 0) > 0).sort((a, b) => {
-      const aRec = a.recommendedOn?.includes(platform) ? 0 : 1;
-      const bRec = b.recommendedOn?.includes(platform) ? 0 : 1;
-      return aRec - bRec;
-    });
+    const rank = (c: ClientDef): number => {
+      if (platform === 'android') {
+        if (c.id === 'incy') return 0;
+        if (c.id === 'happ') return 1;
+      }
+      return c.recommendedOn?.includes(platform) ? 2 : 3;
+    };
+    return CLIENTS.filter((c) => (c.stores[platform]?.length ?? 0) > 0).sort(
+      (a, b) => rank(a) - rank(b),
+    );
   }, [platform]);
 
   const client = useMemo(
@@ -364,9 +373,13 @@ export default function Connect2Page() {
     }
   }, [visibleClients, clientId]);
 
-  // Авто-детект платформы при первой загрузке.
+  // Авто-детект платформы при первой загрузке. Заодно проставляем
+  // дефолтный клиент: на Android — INCY (см. комментарий у visibleClients),
+  // на остальных платформах — Happ как и было.
   useEffect(() => {
-    setPlatform(detectPlatform());
+    const p = detectPlatform();
+    setPlatform(p);
+    setClientId(p === 'android' ? 'incy' : 'happ');
   }, []);
 
   // Загрузка subscription URL. URL берём из ответа бэка (`subscription_url`,
