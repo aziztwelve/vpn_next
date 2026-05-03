@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Loader2, RefreshCw, Smartphone, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Loader2, RefreshCw, Smartphone, Trash2 } from 'lucide-react';
 import { ApiError, vpnApi, type ActiveConnection } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useTelegram } from '@/lib/useTelegram';
@@ -129,9 +129,14 @@ export default function DevicesPage() {
     <div className="min-h-screen bg-slate-950 text-slate-50 pb-24">
       <div className="max-w-2xl mx-auto px-4 pt-5 space-y-4">
         <header className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold">Устройства</h1>
-            <p className="text-slate-400 text-xs mt-0.5">Активные подключения</p>
+          <div className="flex items-start gap-2 min-w-0">
+            <Link href="/" aria-label="Назад" className="p-1 -ml-1 shrink-0">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <div className="min-w-0">
+              <h1 className="text-xl font-semibold">Устройства</h1>
+              <p className="text-slate-400 text-xs mt-0.5">Активные подключения</p>
+            </div>
           </div>
           <button
             type="button"
