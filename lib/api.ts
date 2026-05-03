@@ -9,6 +9,12 @@ import type {
   WithdrawalRequest,
   WithdrawalListResponse,
 } from './referral';
+import type {
+  Campaign,
+  CampaignWithStats,
+  CampaignListResponse,
+  CampaignStats,
+} from './campaign';
 
 // ───── Типы ─────────────────────────────────────────────────────────
 
@@ -435,6 +441,84 @@ class VPNApiClient {
     });
     if (status) params.set('status', status);
     return this.request<WithdrawalListResponse>(`/referral/withdrawals?${params}`);
+  }
+
+  // ─── Admin: Campaigns (role='admin' only, RequireAdmin middleware) ───
+
+  /** Список кампаний + базовая статистика по каждой.
+   *  Бэкенд: GET /api/v1/admin/campaigns. Бросит 403 если не admin. */
+  async listCampaigns(
+    includeArchived = false,
+    limit = 100,
+    offset = 0,
+  ): Promise<CampaignListResponse> {
+    const params = new URLSearchParams({
+      include_archived: includeArchived ? '1' : '0',
+      limit: String(limit),
+      offset: String(offset),
+    });
+    return this.request<CampaignListResponse>(`/admin/campaigns?${params}`);
+  }
+
+  /** Детальная страница — кампания + статистика за период (оба опциональны). */
+  async getCampaign(id: number, from?: string, to?: string): Promise<CampaignWithStats> {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const qs = params.toString();
+    return this.request<CampaignWithStats>(`/admin/campaigns/${id}${qs ? '?' + qs : ''}`);
+  }
+
+  /** Только воронка за период — для обновления графика без перезагрузки Campaign. */
+  async getCampaignStats(id: number, from?: string, to?: string): Promise<CampaignStats> {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const qs = params.toString();
+    return this.request<CampaignStats>(`/admin/campaigns/${id}/stats${qs ? '?' + qs : ''}`);
+  }
+
+  async createCampaign(input: {
+    slug: string;
+    name: string;
+    notes?: string;
+    partner_user_id?: number;
+    payout_percent?: number;
+  }): Promise<{ campaign: Campaign }> {
+    return this.request<{ campaign: Campaign }>('/admin/campaigns', {
+      method: 'POST',
+      body: JSON.stringify({
+        slug: input.slug,
+        name: input.name,
+        notes: input.notes ?? '',
+        partner_user_id: input.partner_user_id ?? 0,
+        payout_percent: input.payout_percent ?? 0,
+      }),
+    });
+  }
+
+  /** Частичное обновление. Чтобы обнулить partner/payout — передай -1. */
+  async updateCampaign(
+    id: number,
+    patch: {
+      name?: string;
+      notes?: string;
+      partner_user_id?: number; // -1 = clear
+      payout_percent?: number;  // -1 = clear
+    },
+  ): Promise<{ campaign: Campaign }> {
+    return this.request<{ campaign: Campaign }>(`/admin/campaigns/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  /** Soft-delete: кампания больше не атрибутирует новых юзеров, но старая
+   *  статистика остаётся. Рассчитано на безопасный rollback через UPDATE. */
+  async archiveCampaign(id: number): Promise<{ campaign: Campaign }> {
+    return this.request<{ campaign: Campaign }>(`/admin/campaigns/${id}/archive`, {
+      method: 'POST',
+    });
   }
 }
 
