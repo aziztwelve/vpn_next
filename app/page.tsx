@@ -7,6 +7,7 @@ import {
   CreditCard,
   Globe,
   History,
+  Megaphone,
   Shield,
   Smartphone,
   Sparkles,
@@ -128,6 +129,27 @@ export default function HomePage() {
           <SmallLink href="/devices" icon={<Smartphone className="w-4 h-4" />} label="Устройства" />
           <SmallLink href="/history" icon={<History className="w-4 h-4" />} label="История" />
         </section>
+
+        {/* ── Admin-only: разделитель + блок управления ────────────
+            Видно только при user.role === 'admin'. Обычные юзеры даже
+            не узнают, что такой раздел существует. Новые админские
+            ручки просто пушатся в <AdminLink /> ниже. */}
+        {user?.role === 'admin' && (
+          <section className="pt-2 space-y-2">
+            <div className="flex items-center gap-2 pt-2">
+              <div className="flex-1 h-px bg-slate-800" />
+              <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                Только для админа
+              </span>
+              <div className="flex-1 h-px bg-slate-800" />
+            </div>
+            <AdminLink
+              href="/admin/campaigns"
+              icon={<Megaphone className="w-4 h-4" />}
+              label="Воронки"
+            />
+          </section>
+        )}
 
         <footer className="text-slate-500 text-[11px] pt-3 flex items-center gap-1.5">
           <Shield className="w-3.5 h-3.5" />
@@ -324,6 +346,34 @@ function SmallLink({
     >
       {icon}
       {label}
+    </Link>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// AdminLink — полноширинная строка для admin-only разделов.
+// Тон нейтрально-янтарный, чтобы визуально отделить от юзерских
+// SmallLink'ов выше, но без «ALERT»-вау-эффекта.
+// ─────────────────────────────────────────────────────────────
+function AdminLink({
+  href,
+  icon,
+  label,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 hover:border-amber-500/50 px-4 py-3 text-sm text-amber-200 hover:text-amber-100 transition"
+    >
+      <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-amber-400/15 text-amber-300 shrink-0">
+        {icon}
+      </span>
+      <span className="flex-1 font-medium">{label}</span>
+      <ArrowRight className="w-4 h-4 text-amber-400/60 group-hover:translate-x-0.5 group-hover:text-amber-300 transition" />
     </Link>
   );
 }

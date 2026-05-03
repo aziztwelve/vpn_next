@@ -2,9 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { CreditCard, Globe, Home, Info, Megaphone, Users } from 'lucide-react'
-
-import { useAuth } from '@/lib/auth-context'
+import { CreditCard, Globe, Home, Info, Users } from 'lucide-react'
 
 // Bottom navigation для Mini App. Размеры на ~25% больше дефолтных
 // (h-20 vs h-16, иконки w-6 h-6 vs w-5 h-5, text-sm vs text-xs) — чтобы
@@ -16,7 +14,6 @@ import { useAuth } from '@/lib/auth-context'
 
 export function BottomNav() {
   const pathname = usePathname()
-  const { user } = useAuth()
 
   // 5 пунктов меню. История убрана (доступна со страницы Тарифы и из
   // профиля), вместо неё «Рефералка» — раздел реферальной программы
@@ -25,8 +22,8 @@ export function BottomNav() {
   // под другим текстом — здесь намеренно жаргонный лейбл, узнаваемый
   // в Telegram/VPN-аудитории.
   //
-  // Для role='admin' добавляется 6-й пункт «Воронки» (маркетинговые
-  // кампании). Остальные юзеры даже не видят что такой раздел существует.
+  // Админские разделы (Воронки и т.п.) живут не тут, а блоком на главной
+  // ниже Устройств/Истории — чтобы обычный юзер даже не подозревал.
   const links: { href: string; icon: typeof Home; label: string }[] = [
     { href: '/', icon: Home, label: 'Главная' },
     { href: '/plans', icon: CreditCard, label: 'Тарифы' },
@@ -34,9 +31,6 @@ export function BottomNav() {
     { href: '/referral', icon: Users, label: 'Рефералка' },
     { href: '/info', icon: Info, label: 'Инфо' },
   ]
-  if (user?.role === 'admin') {
-    links.push({ href: '/admin/campaigns', icon: Megaphone, label: 'Воронки' })
-  }
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur border-t border-slate-800 safe-area-inset-bottom z-50">
