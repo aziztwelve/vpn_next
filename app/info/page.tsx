@@ -405,7 +405,7 @@ function SupportContacts() {
 
       {/* Telegram */}
       <a
-        href="https://t.me/maydavpn_support_bot"
+        href="https://t.me/maydavpn_support"
         target="_blank"
         rel="noopener noreferrer"
         className="block bg-slate-800 hover:bg-slate-700 rounded-xl p-6 transition-colors"
@@ -416,7 +416,7 @@ function SupportContacts() {
           </div>
           <div className="flex-1">
             <h3 className="font-semibold text-lg">Telegram</h3>
-            <p className="text-slate-400 text-sm">@maydavpn_support_bot</p>
+            <p className="text-slate-400 text-sm">@maydavpn_support</p>
             <p className="text-slate-500 text-xs mt-1">Ответ в течение 24 часов</p>
           </div>
         </div>
